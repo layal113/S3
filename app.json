@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "S3VS",
-    "slug": "S3VS",
+    "name": "S3 Home Energy Usage Optimizer",
+    "slug": "s3-home-energy-optimizer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
