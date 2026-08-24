@@ -114,9 +114,12 @@ def get_breakdown(request: BreakdownRequest):
     # Convert request readings to DataFrame
     rows = []
     for r in request.readings:
+        p_val = r.get("mains_power") if r.get("mains_power") is not None else r.get("mainsPower")
+        if p_val is None:
+            p_val = r.get("aggregate_power_w") if r.get("aggregate_power_w") is not None else r.get("power_w", 0.0)
         rows.append({
             "timestamp": r.get("timestamp"),
-            "mains_power": float(r.get("mains_power") or r.get("aggregate_power_w") or r.get("power_w", 0.0))
+            "mains_power": float(p_val)
         })
     df_input = pd.DataFrame(rows)
 
@@ -244,16 +247,16 @@ def get_usage_history(household_id: str, period: str = Query("7d")):
         points.append(
             HistoryPoint(
                 timestamp=d,
-                total_kwh=kwh,
-                estimated_cost_egp=cost,
-                baseline_kwh=15.0,
-                baseline_cost_egp=15.0 * 2.15,
+                totalKWh=kwh,
+                estimatedCostEGP=cost,
+                baselineKWh=15.0,
+                baselineCostEGP=15.0 * 2.15,
                 appliances={
-                    "ac_hvac": HistoryPointAppliance(kwh=0.0, cost_egp=0.0),
-                    "water_heater": HistoryPointAppliance(kwh=0.0, cost_egp=0.0),
-                    "fridge": HistoryPointAppliance(kwh=kwh * 0.30, cost_egp=cost * 0.30),
-                    "lighting": HistoryPointAppliance(kwh=kwh * 0.25, cost_egp=cost * 0.25),
-                    "other": HistoryPointAppliance(kwh=kwh * 0.45, cost_egp=cost * 0.45),
+                    "airConditioner": {"kWh": 0.0, "costEGP": 0.0},
+                    "waterHeater": {"kWh": 0.0, "costEGP": 0.0},
+                    "refrigerator": {"kWh": kwh * 0.30, "costEGP": cost * 0.30},
+                    "lighting": {"kWh": kwh * 0.25, "costEGP": cost * 0.25},
+                    "other": {"kWh": kwh * 0.45, "costEGP": cost * 0.45},
                 },
             )
         )

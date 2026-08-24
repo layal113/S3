@@ -140,10 +140,12 @@ class ApplianceDisaggregator:
                 share = 0.0
 
             appliance_breakdown.append({
-                "category": cat,
+                "category": display_name,
+                "internal_category": cat,
                 "display_name": display_name,
                 "consumption_kwh": cat_kwh,
                 "share_percent": share,
+                "confidence": conf_label,
                 "confidence_score": confidence_score,
                 "confidence_label": conf_label,
                 "not_yet_trained": not_yet_trained,

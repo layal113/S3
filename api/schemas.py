@@ -12,10 +12,12 @@ class BaseSchema(BaseModel):
 
 
 class ApplianceBreakdownItem(BaseSchema):
-    category: str = Field(..., description="Internal taxonomy category key, e.g. 'fridge', 'ac_hvac'")
+    category: str = Field(..., description="Category display name or internal key")
+    internal_category: str = Field(..., description="Internal taxonomy key, e.g. 'fridge', 'ac_hvac'")
     display_name: str = Field(..., description="Presentation display name, e.g. 'Refrigerator'")
     consumption_kwh: float = Field(..., description="Consumption in kWh over period")
     share_percent: float = Field(..., description="Percentage share of total consumption (0-100%)")
+    confidence: str = Field(..., description="Confidence label matching frontend ApplianceUsage interface")
     confidence_score: float = Field(..., description="Numeric confidence score (0.0 to 1.0)")
     confidence_label: Literal["High", "Medium", "Low", "N/A"] = Field(
         ..., description="Confidence tier: High >=0.70, Medium 0.40-0.70, Low <0.40, N/A for untrained"
@@ -100,18 +102,26 @@ class DashboardResponse(BaseSchema):
     updated_at: str
 
 
-class HistoryPointAppliance(BaseSchema):
-    kwh: float
-    cost_egp: float
+class HistoryPointAppliance(BaseModel):
+    kWh: float = Field(..., serialization_alias="kWh")
+    costEGP: float = Field(..., serialization_alias="costEGP")
 
 
-class HistoryPoint(BaseSchema):
+class HistoryPointAppliances(BaseModel):
+    airConditioner: HistoryPointAppliance = Field(..., serialization_alias="airConditioner")
+    waterHeater: HistoryPointAppliance = Field(..., serialization_alias="waterHeater")
+    refrigerator: HistoryPointAppliance = Field(..., serialization_alias="refrigerator")
+    lighting: HistoryPointAppliance = Field(..., serialization_alias="lighting")
+    other: HistoryPointAppliance = Field(..., serialization_alias="other")
+
+
+class HistoryPoint(BaseModel):
     timestamp: str
-    total_kwh: float
-    estimated_cost_egp: float
-    baseline_kwh: float
-    baseline_cost_egp: float
-    appliances: Dict[str, HistoryPointAppliance]
+    totalKWh: float = Field(..., serialization_alias="totalKWh")
+    estimatedCostEGP: float = Field(..., serialization_alias="estimatedCostEGP")
+    baselineKWh: float = Field(..., serialization_alias="baselineKWh")
+    baselineCostEGP: float = Field(..., serialization_alias="baselineCostEGP")
+    appliances: HistoryPointAppliances
     anomaly: Optional[Dict[str, str]] = None
 
 
