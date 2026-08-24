@@ -1,0 +1,54 @@
+{
+  "dataset_sample_notice": "Dataset Notice: Trained on a 1,000-row sample of UK-DALE dataset across 5 houses. Results reflect sample demonstration scale.",
+  "sample_size_rows": 853,
+  "excluded_gap_rows": 0,
+  "houses": [
+    "UKDALE_house_1",
+    "UKDALE_house_2",
+    "UKDALE_house_3",
+    "UKDALE_house_4",
+    "UKDALE_house_5"
+  ],
+  "feature_columns": [
+    "power_w",
+    "power_delta",
+    "rolling_mean_5m",
+    "rolling_std_5m",
+    "rolling_mean_15m",
+    "rolling_std_15m",
+    "hour_of_day",
+    "day_of_week"
+  ],
+  "trained_categories": [
+    "fridge",
+    "lighting",
+    "other"
+  ],
+  "untrained_categories": [
+    "ac_hvac",
+    "water_heater"
+  ],
+  "metrics": {
+    "fridge": {
+      "accuracy": 0.5523,
+      "precision": 0.3403,
+      "recall": 0.3189,
+      "f1_score": 0.3277,
+      "positive_class_ratio": 0.3447
+    },
+    "lighting": {
+      "accuracy": 0.7311,
+      "precision": 0.2606,
+      "recall": 0.0721,
+      "f1_score": 0.1125,
+      "positive_class_ratio": 0.2438
+    },
+    "other": {
+      "accuracy": 0.577,
+      "precision": 0.3642,
+      "recall": 0.2297,
+      "f1_score": 0.2806,
+      "positive_class_ratio": 0.3611
+    }
+  }
+}
