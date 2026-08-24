@@ -30,22 +30,31 @@ export const spacing = {
 export const radii = { sm: 8, md: 14, lg: 20, pill: 999 } as const;
 export const typography = {
   title: {
+    fontFamily: 'SpaceGrotesk_700Bold',
     fontSize: 28,
     lineHeight: 34,
     fontWeight: '700',
   } satisfies TextStyle,
   heading: {
+    fontFamily: 'SpaceGrotesk_700Bold',
     fontSize: 19,
     lineHeight: 25,
     fontWeight: '700',
   } satisfies TextStyle,
-  body: { fontSize: 15, lineHeight: 22, fontWeight: '400' } satisfies TextStyle,
+  body: {
+    fontFamily: 'SpaceGrotesk_400Regular',
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '400',
+  } satisfies TextStyle,
   label: {
+    fontFamily: 'SpaceGrotesk_600SemiBold',
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '600',
   } satisfies TextStyle,
   value: {
+    fontFamily: 'SpaceGrotesk_700Bold',
     fontSize: 25,
     lineHeight: 31,
     fontWeight: '700',

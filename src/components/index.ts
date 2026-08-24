@@ -1,4 +1,6 @@
 export { KpiCard } from './KpiCard';
+export { MiqyasGaugeLogo } from './MiqyasGaugeLogo';
+export { MiqyasBrand } from './MiqyasBrand';
 export { RecommendationCard } from './RecommendationCard';
 export { SectionHeader } from './SectionHeader';
 export { StatusBadge } from './StatusBadge';

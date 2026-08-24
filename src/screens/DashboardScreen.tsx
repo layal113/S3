@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -9,15 +8,13 @@ import {
   DashboardSummary,
   HomeHeader,
   HouseholdSelector,
-  PredictedBillCard,
   PriorityInsightCard,
   RecommendationCard,
-  TariffStatusCard,
 } from '../components';
 import { useDashboard } from '../hooks/useDashboard';
 import type { DashboardService } from '../services';
+import { useHouseholdProfile } from '../state/HouseholdProfileContext';
 import { colors, spacing } from '../theme';
-import type { HouseholdId } from '../types/dashboard';
 import type { HistoryAppliance } from '../types/history';
 
 export function DashboardScreen({
@@ -31,13 +28,29 @@ export function DashboardScreen({
   onRecommendationPress: () => void;
   onProfilePress: () => void;
 }) {
-  const households = service.getHouseholds();
-  const [selectedHouseholdId, setSelectedHouseholdId] =
-    useState<HouseholdId>('high-ac-home');
+  const { profiles, selectedHouseholdId, selectedProfile, selectHousehold } =
+    useHouseholdProfile();
+  const households = service.getHouseholds().map((household) => ({
+    ...household,
+    name: profiles[household.id].householdName,
+  }));
   const { data, error, isLoading, reload } = useDashboard(
     service,
     selectedHouseholdId,
   );
+  const displayedData = data
+    ? {
+        ...data,
+        householdName: selectedProfile.householdName,
+        billingPeriodLabel: `Starts ${selectedProfile.billingCycleStart}`,
+        simulated: selectedProfile.simulated,
+        tariffStatus: {
+          ...data.tariffStatus,
+          currentTier: selectedProfile.tariffTier,
+          nextTier: selectedProfile.tariffTier + 1,
+        },
+      }
+    : null;
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
@@ -48,9 +61,9 @@ export function DashboardScreen({
         <HouseholdSelector
           households={households}
           selectedId={selectedHouseholdId}
-          onSelect={setSelectedHouseholdId}
+          onSelect={selectHousehold}
         />
-        {isLoading || !data ? (
+        {isLoading || !displayedData ? (
           error ? (
             <DashboardErrorState message={error} onRetry={reload} />
           ) : (
@@ -61,26 +74,23 @@ export function DashboardScreen({
         ) : (
           <>
             <HomeHeader
-              householdName={data.householdName}
-              billingPeriodLabel={data.billingPeriodLabel}
-              updatedAt={data.updatedAt}
+              userName={selectedProfile.userName}
+              householdName={displayedData.householdName}
+              location={selectedProfile.location}
+              homeType={selectedProfile.homeType}
+              residents={selectedProfile.residents}
+              billingPeriodLabel={displayedData.billingPeriodLabel}
+              updatedAt={displayedData.updatedAt}
               onProfilePress={onProfilePress}
             />
-            <PredictedBillCard
-              billEgp={data.predictedMonthEndBillEgp}
-              projectedKwh={data.projectedMonthlyKwh}
-              changePercent={data.changeFromPreviousMonthPercent}
-              previousBillEgp={data.previousMonthBillEgp}
-            />
-            <DashboardSummary data={data} />
-            <TariffStatusCard tariff={data.tariffStatus} />
-            <PriorityInsightCard insight={data.priorityInsight} />
+            <DashboardSummary data={displayedData} />
+            <PriorityInsightCard insight={displayedData.priorityInsight} />
             <ApplianceBreakdown
-              appliances={data.applianceBreakdown}
+              appliances={displayedData.applianceBreakdown}
               onAppliancePress={onAppliancePress}
             />
             <RecommendationCard
-              recommendation={data.recommendation}
+              recommendation={displayedData.recommendation}
               onPress={onRecommendationPress}
             />
           </>

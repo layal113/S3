@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MiqyasBrand } from '../components/MiqyasBrand';
 import { UsageHistoryChart } from '../components/UsageHistoryChart';
 import type { HistoryService } from '../services';
 import { colors, radii, shadows, spacing, typography } from '../theme';
@@ -114,7 +115,7 @@ export function UsageHistoryScreen({
         showsVerticalScrollIndicator={false}
       >
         <View>
-          <Text style={styles.eyebrow}>S3 ENERGY</Text>
+          <MiqyasBrand />
           <Text accessibilityRole="header" style={styles.title}>
             Usage history
           </Text>
@@ -256,7 +257,6 @@ export function UsageHistoryScreen({
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.background, flex: 1 },
   content: { gap: spacing.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
-  eyebrow: { ...typography.label, color: colors.primary, letterSpacing: 1 },
   title: { ...typography.title, color: colors.text },
   subtitle: { ...typography.body, color: colors.textMuted },
   toggle: {

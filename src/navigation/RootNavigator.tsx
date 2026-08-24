@@ -5,8 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlaceholderScreen } from '../screens/PlaceholderScreen';
 import { DashboardScreen } from '../screens/DashboardScreen';
+import { ProfileScreen } from '../screens/ProfileScreen';
 import { UsageHistoryScreen } from '../screens/UsageHistoryScreen';
 import type { DashboardService, HistoryService } from '../services';
+import { useHouseholdProfile } from '../state/HouseholdProfileContext';
 import { colors, shadows, typography } from '../theme';
 import type { HistoryAppliance } from '../types/history';
 
@@ -14,7 +16,7 @@ export type RootTabParamList = {
   Home: undefined;
   Insights:
     { appliance?: HistoryAppliance; selectionRequestId?: number } | undefined;
-  Recommendations: undefined;
+  'Smart Tips': undefined;
   Profile: undefined;
 };
 
@@ -26,7 +28,7 @@ const iconNames: Record<
 > = {
   Home: 'home-outline',
   Insights: 'stats-chart-outline',
-  Recommendations: 'leaf-outline',
+  'Smart Tips': 'leaf-outline',
   Profile: 'person-outline',
 };
 
@@ -36,7 +38,7 @@ const activeIconNames: Record<
 > = {
   Home: 'home',
   Insights: 'stats-chart',
-  Recommendations: 'leaf',
+  'Smart Tips': 'leaf',
   Profile: 'person',
 };
 
@@ -60,6 +62,7 @@ export function RootNavigator({
   historyService: HistoryService;
 }) {
   const insets = useSafeAreaInsets();
+  const { selectedHouseholdId } = useHouseholdProfile();
 
   return (
     <NavigationContainer theme={navigationTheme}>
@@ -99,9 +102,7 @@ export function RootNavigator({
                   selectionRequestId: Date.now(),
                 })
               }
-              onRecommendationPress={() =>
-                navigation.navigate('Recommendations')
-              }
+              onRecommendationPress={() => navigation.navigate('Smart Tips')}
               onProfilePress={() => navigation.navigate('Profile')}
             />
           )}
@@ -115,11 +116,11 @@ export function RootNavigator({
             />
           )}
         </Tab.Screen>
-        <Tab.Screen name="Recommendations">
+        <Tab.Screen name="Smart Tips">
           {() => <PlaceholderScreen title="Recommendations" />}
         </Tab.Screen>
         <Tab.Screen name="Profile">
-          {() => <PlaceholderScreen title="Profile" />}
+          {() => <ProfileScreen key={selectedHouseholdId} />}
         </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>

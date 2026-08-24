@@ -1,4 +1,4 @@
-# S3 Home Energy Usage Optimizer
+# Miqyas Energy
 
 Initial mobile-first frontend foundation for an energy dashboard. It uses Expo SDK 57, React Native, and strict TypeScript, and is intended to run on Android, iOS, and web.
 
@@ -54,7 +54,25 @@ The future backend base URL is configured with `EXPO_PUBLIC_API_BASE_URL`. Value
 
 The Home tab is the only implemented product screen. Insights, Recommendations, and Profile are navigation placeholders for later phases.
 
-The Home screen depends only on the `DashboardService` interface, never on the raw mock dataset. When the backend contract is finalized, implement the same interface with an API client and change the service composition in `src/services/index.ts`. No dashboard presentation rewrite should be necessary. Endpoint paths and response shapes are intentionally not guessed yet.
+The Home screen depends only on the `DashboardService` interface, never on the raw mock dataset. When the backend is ready, implement the same interface with an API client and change the service composition in `src/services/index.ts`. No dashboard presentation rewrite should be necessary.
+
+## Placeholder API contract
+
+The app still makes no network requests. Future REST paths are centralized in `src/config/apiEndpoints.ts` so backend integration can happen without scattering URLs through the UI.
+
+| Method | Path                                           | Purpose                                                                   |
+| ------ | ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `GET`  | `/v1/households`                               | List households available to the user                                     |
+| `GET`  | `/v1/households/:householdId`                  | Household details                                                         |
+| `GET`  | `/v1/households/:householdId/dashboard`        | Complete Home dashboard snapshot                                          |
+| `GET`  | `/v1/households/:householdId/usage/current`    | Current kWh and estimated cost                                            |
+| `GET`  | `/v1/households/:householdId/forecast`         | Predicted usage, bill, and comparison                                     |
+| `GET`  | `/v1/households/:householdId/tariff-status`    | Current tier, threshold, and remaining kWh                                |
+| `GET`  | `/v1/households/:householdId/appliances/usage` | Appliance breakdown                                                       |
+| `GET`  | `/v1/households/:householdId/usage/history`    | Usage history; later accepts period, unit, and appliance query parameters |
+| `GET`  | `/v1/households/:householdId/recommendations`  | Energy-saving recommendations                                             |
+
+All paths are relative to `EXPO_PUBLIC_API_BASE_URL`. The existing local mock services remain the active data source.
 
 ## Quality checks
 

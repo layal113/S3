@@ -1,16 +1,14 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors, radii, spacing, typography } from '../theme';
+import { MiqyasBrand } from '../components/MiqyasBrand';
+import { colors, spacing, typography } from '../theme';
 
 export function PlaceholderScreen({ title }: { title: string }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.content}>
-        <View style={styles.iconContainer}>
-          <Ionicons color={colors.primary} name="leaf-outline" size={30} />
-        </View>
+        <MiqyasBrand />
         <Text accessibilityRole="header" style={styles.title}>
           {title}
         </Text>
@@ -30,14 +28,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     justifyContent: 'center',
     padding: spacing.xl,
-  },
-  iconContainer: {
-    alignItems: 'center',
-    backgroundColor: colors.tealSoft,
-    borderRadius: radii.pill,
-    height: 64,
-    justifyContent: 'center',
-    width: 64,
   },
   title: { ...typography.heading, color: colors.text },
   message: { ...typography.body, color: colors.textMuted, textAlign: 'center' },

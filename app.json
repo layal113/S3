@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "S3 Home Energy Usage Optimizer",
-    "slug": "s3-home-energy-optimizer",
+    "name": "Miqyas",
+    "slug": "miqyas-energy",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,6 +20,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0F6E56"
+        }
+      ]
+    ]
   }
 }

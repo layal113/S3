@@ -1,7 +1,7 @@
 import type { DashboardData, HouseholdOption } from '../types/dashboard';
 
 export const simulatedHouseholds: HouseholdOption[] = [
-  { id: 'high-ac-home', name: 'Ahmed’s Home' },
+  { id: 'high-ac-home', name: 'Hussams’s Home' },
   { id: 'efficient-flat', name: 'Nour’s Flat' },
   { id: 'family-villa', name: 'Family Villa' },
 ];
@@ -10,7 +10,7 @@ export const simulatedDashboards: Record<HouseholdOption['id'], DashboardData> =
   {
     'high-ac-home': {
       householdId: 'high-ac-home',
-      householdName: 'Ahmed’s Home',
+      householdName: 'Hussams’s Home',
       billingPeriodLabel: '1–31 August 2026',
       currentConsumptionKwh: 382,
       currentEstimatedCostEgp: 820,
