@@ -1,5 +1,8 @@
 {
-  "dataset_sample_notice": "Dataset Notice: Trained on a 1,000-row sample of UK-DALE dataset across 5 houses. Results reflect sample demonstration scale.",
+  "dataset_sample_notice": "Dataset Notice: Trained on a sample of UK-DALE (5 houses) and IAWE (1 house, 2 synthetic channel splits). Results reflect sample demonstration scale.",
+  "house_count_breakdown": "6 physical households (5 UK-DALE + 1 IAWE) split into 7 GroupKFold evaluation clusters via 1 synthetic channel split (IAWE_house_1 / IAWE_house_2).",
+  "iawe_house_split_note": "IAWE_house_1 and IAWE_house_2 represent a synthetic split of IAWE dataset channels for GroupKFold cross-validation, not distinct physical households.",
+  "ac_hvac_sample_limitation_note": "AC/HVAC positive readings (310 samples) originate entirely from IAWE channels (IAWE_house_1 and IAWE_house_2). All UK-DALE houses (UKDALE_house_1 to UKDALE_house_5) contain 0 positive AC samples.",
   "sample_size_rows": 1853,
   "excluded_gap_rows": 0,
   "houses": [

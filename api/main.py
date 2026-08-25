@@ -134,6 +134,8 @@ def compute_dynamic_recommendation(breakdown_items: List[ApplianceBreakdownItem]
     2. Scales window consumption (kWh) to daily consumption (x 1440 / duration_minutes).
     3. Projects monthly baseline consumption (daily_kwh * 30 days).
     4. Calculates 25% potential savings factor (round(monthly_kwh * 0.25, 1)).
+
+    Note: The 25% reduction factor (0.25) is a stated business heuristic for potential energy optimization savings, not an ML-inferred or empirical model measurement.
     """
     # Exclude Other/unclassified if specific appliances exist
     specific_items = [item for item in breakdown_items if item.internal_category != "other" and not item.not_yet_trained and item.consumption_kwh > 0]
@@ -374,11 +376,18 @@ def get_breakdown_demo(household_id: str = "high-ac-home"):
 
 @app.get("/get-recommendation", response_model=RecommendationResponse)
 @app.post("/get-recommendation", response_model=RecommendationResponse)
-def get_recommendation():
+def get_recommendation(
+    household_id: Optional[str] = Query(None),
+    breakdown: Optional[BreakdownResponse] = Body(None),
+):
     """
     Calculates dynamic recommendation derived from active disaggregation breakdown.
     """
-    demo_breakdown = get_breakdown_demo("high-ac-home")
+    if breakdown and breakdown.appliance_breakdown:
+        return compute_dynamic_recommendation(breakdown.appliance_breakdown, breakdown.duration_minutes)
+
+    target_id = household_id or (list(latest_breakdowns.keys())[-1] if latest_breakdowns else "high-ac-home")
+    demo_breakdown = get_latest_breakdown(target_id)
     return compute_dynamic_recommendation(demo_breakdown.appliance_breakdown, demo_breakdown.duration_minutes)
 
 

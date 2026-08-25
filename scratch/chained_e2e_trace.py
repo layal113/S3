@@ -29,9 +29,8 @@ def run_chained_trace():
     print("\n=== STEP 2: /get-breakdown RESPONSE (Chained from /simulate-usage) ===")
     print(json.dumps(breakdown_data, indent=2))
 
-    # Step 3: Take breakdown output and feed into /get-recommendation
-    # (/get-recommendation is a GET/POST endpoint)
-    rec_response = client.get("/get-recommendation")
+    # Step 3: Take breakdown output and feed into /get-recommendation for exact same household
+    rec_response = client.get(f"/get-recommendation?household_id={sim_data['householdId']}")
     rec_data = rec_response.json()
 
     print("\n=== STEP 3: /get-recommendation RESPONSE ===")

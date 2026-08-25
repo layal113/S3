@@ -19,6 +19,13 @@ from data.config import (
 )
 from model.features import extract_features, FEATURE_COLUMNS
 
+# Deployed classification decision thresholds derived from GroupKFold threshold sweeps (V3 & V4)
+DECISION_THRESHOLDS = {
+    INTERNAL_CATEGORY_FRIDGE: 0.40,
+    INTERNAL_CATEGORY_LIGHTING: 0.15,  # Deployed from V3 threshold sweep (improves recall from 26.7% to 91.6%)
+    INTERNAL_CATEGORY_AC_HVAC: 0.40,   # Deployed from V4 threshold sweep (optimal F1 balance)
+    INTERNAL_CATEGORY_OTHER: 0.35,
+}
 
 def get_model_score_label(score: float, not_yet_trained: bool) -> str:
     """
@@ -70,6 +77,7 @@ class ApplianceDisaggregator:
     def predict(self, input_df: pd.DataFrame, power_column: str = "mains_power", timestamp_column: str = "timestamp") -> Dict[str, Any]:
         """
         Takes raw aggregate power time series and integrates appliance power over the entire reading window to compute kWh.
+        Enforces deployed decision thresholds and unattributed baseline accounting (V1 & V3).
 
         Requires minimum input window of MINIMUM_FEATURE_WINDOW_SIZE (15) contiguous readings.
         """
@@ -79,49 +87,45 @@ class ApplianceDisaggregator:
                 f"window size ({MINIMUM_FEATURE_WINDOW_SIZE} 1-minute readings) needed for 15-minute rolling statistics."
             )
 
-        # 1. Run through identical shared feature engineering pipeline across all readings in window
         features_df = extract_features(input_df, power_column=power_column, timestamp_column=timestamp_column)
         n_readings = len(input_df)
 
-        # Calculate total aggregate mains consumption across all readings (kWh)
         mains_power_series = input_df[power_column].astype(float).values
         total_mains_kwh = float(np.sum(mains_power_series * (1.0 / 60.0) / 1000.0))
 
         cat_powers_per_step = {cat: np.zeros(n_readings) for cat in SUPPORTED_CATEGORIES}
         cat_scores = {}
 
-        # 2. Predict per-reading state probabilities across the entire reading window
         for cat in SUPPORTED_CATEGORIES:
             if cat in self.models:
                 model = self.models[cat]
                 probas = model.predict_proba(features_df)
-                # Extract class 1 (ON) probabilities for all rows in window
                 if len(model.classes_) > 1 and 1 in model.classes_:
                     idx_on = int(np.where(model.classes_ == 1)[0][0])
                     on_probs = probas[:, idx_on]
                 else:
                     on_probs = probas[:, 0]
 
-                # Store average model score across window
+                thresh = DECISION_THRESHOLDS.get(cat, 0.50)
+                # Binary state active if probability meets deployed decision threshold
+                active_mask = (on_probs >= thresh).astype(float)
+
                 latest_prob = float(on_probs[-1])
                 score = round(max(latest_prob, 1.0 - latest_prob), 4)
                 cat_scores[cat] = score
 
-                # Power estimation per 1-minute sample (Watts)
                 if cat == INTERNAL_CATEGORY_FRIDGE:
-                    cat_powers_per_step[cat] = 100.0 * on_probs
+                    cat_powers_per_step[cat] = 100.0 * active_mask
                 elif cat == INTERNAL_CATEGORY_LIGHTING:
-                    cat_powers_per_step[cat] = 15.0 * on_probs
+                    cat_powers_per_step[cat] = 15.0 * active_mask
                 elif cat == INTERNAL_CATEGORY_AC_HVAC:
-                    cat_powers_per_step[cat] = 1600.0 * on_probs
+                    cat_powers_per_step[cat] = 1600.0 * active_mask
                 elif cat == INTERNAL_CATEGORY_OTHER:
-                    # Allocate remaining power
                     other_p = mains_power_series - (cat_powers_per_step[INTERNAL_CATEGORY_FRIDGE] + cat_powers_per_step[INTERNAL_CATEGORY_LIGHTING] + cat_powers_per_step[INTERNAL_CATEGORY_AC_HVAC])
-                    cat_powers_per_step[cat] = np.maximum(0.0, other_p) * on_probs
+                    cat_powers_per_step[cat] = np.maximum(0.0, other_p) * active_mask
             else:
                 cat_scores[cat] = 0.0
 
-        # 3. Integrate appliance powers over time (convert Watts to kWh per reading)
         cat_kwh_dict = {}
         total_appliance_kwh = 0.0
         for cat in SUPPORTED_CATEGORIES:
@@ -142,7 +146,7 @@ class ApplianceDisaggregator:
                 score = cat_scores[cat]
                 score_label = get_model_score_label(score, not_yet_trained=False)
                 cat_kwh = round(cat_kwh_dict[cat], 4)
-                share = round((cat_kwh_dict[cat] / total_appliance_kwh * 100.0), 2) if total_appliance_kwh > 0 else 0.0
+                share = round((cat_kwh / total_mains_kwh * 100.0), 2) if total_mains_kwh > 0 else 0.0
             else:
                 score = 0.0
                 score_label = "N/A"
@@ -159,6 +163,21 @@ class ApplianceDisaggregator:
                 "model_score_label": score_label,
                 "not_yet_trained": not_yet_trained,
             })
+
+        # V1 FIX: Explicit unattributed / baseline consumption accounting so shares sum to 100% of total mains consumption
+        unattributed_kwh = max(0.0, total_mains_kwh - total_appliance_kwh)
+        unattributed_share = round((unattributed_kwh / total_mains_kwh * 100.0), 2) if total_mains_kwh > 0 else 0.0
+
+        appliance_breakdown.append({
+            "category": "Unattributed / baseline",
+            "internal_category": "unattributed",
+            "display_name": "Unattributed / baseline",
+            "consumption_kwh": round(unattributed_kwh, 4),
+            "share_percent": unattributed_share,
+            "model_score": 1.0,
+            "model_score_label": "High",
+            "not_yet_trained": False,
+        })
 
         latest_row = input_df.iloc[-1]
         return {
@@ -184,5 +203,5 @@ if __name__ == "__main__":
         "mains_power": [200.0] * 20
     })
     res = predict_disaggregation(dummy_input)
-    print("Integration Test Prediction Result:")
+    print("Updated Prediction Result with Unattributed Accounting:")
     print(json.dumps(res, indent=2))
