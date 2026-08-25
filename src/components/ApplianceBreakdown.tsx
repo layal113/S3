@@ -121,7 +121,7 @@ export function ApplianceBreakdown({
                   <View style={styles.applianceCopy}>
                     <Text style={styles.applianceName}>{item.category}</Text>
                     <Text style={styles.confidence}>
-                      {item.confidence} confidence
+                      {item.modelScoreLabel ?? item.confidence ?? 'N/A'} model score
                     </Text>
                   </View>
                   <View style={styles.values}>

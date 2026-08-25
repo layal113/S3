@@ -1,12 +1,12 @@
 import type { DashboardService } from './DashboardService';
-import { MockDashboardService } from './MockDashboardService';
+import { ApiDashboardService } from './ApiDashboardService';
 import type { HistoryService } from './HistoryService';
 import { MockHistoryService } from './MockHistoryService';
 
-// TODO: Replace this composition with an API-backed DashboardService once the
-// backend contract and endpoints are finalized.
-export const dashboardService: DashboardService = new MockDashboardService();
+// Active dashboard service points to the live FastAPI backend
+export const dashboardService: DashboardService = new ApiDashboardService();
 export const historyService: HistoryService = new MockHistoryService();
 
 export type { DashboardService } from './DashboardService';
 export type { HistoryService } from './HistoryService';
+export { ApiDashboardService } from './ApiDashboardService';

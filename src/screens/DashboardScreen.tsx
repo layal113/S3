@@ -1,4 +1,5 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -13,8 +14,9 @@ import {
 } from '../components';
 import { useDashboard } from '../hooks/useDashboard';
 import type { DashboardService } from '../services';
+import { ApiDashboardService } from '../services/ApiDashboardService';
 import { useHouseholdProfile } from '../state/HouseholdProfileContext';
-import { colors, spacing } from '../theme';
+import { colors, radii, spacing, typography } from '../theme';
 import type { HistoryAppliance } from '../types/history';
 
 export function DashboardScreen({
@@ -28,6 +30,7 @@ export function DashboardScreen({
   onRecommendationPress: () => void;
   onProfilePress: () => void;
 }) {
+  const [isSimulating, setIsSimulating] = useState(false);
   const { profiles, selectedHouseholdId, selectedProfile, selectHousehold } =
     useHouseholdProfile();
   const households = service.getHouseholds().map((household) => ({
@@ -38,6 +41,23 @@ export function DashboardScreen({
     service,
     selectedHouseholdId,
   );
+
+  const handleRunSimulation = async () => {
+    if (service instanceof ApiDashboardService) {
+      try {
+        setIsSimulating(true);
+        await service.triggerSimulation(selectedHouseholdId);
+        await reload();
+      } catch (err) {
+        console.warn('Simulation trigger failed:', err);
+      } finally {
+        setIsSimulating(false);
+      }
+    } else {
+      await reload();
+    }
+  };
+
   const displayedData = data
     ? {
         ...data,
@@ -63,6 +83,17 @@ export function DashboardScreen({
           selectedId={selectedHouseholdId}
           onSelect={selectHousehold}
         />
+
+        <Pressable
+          style={[styles.simButton, isSimulating && styles.simButtonDisabled]}
+          onPress={handleRunSimulation}
+          disabled={isSimulating}
+        >
+          <Text style={styles.simButtonText}>
+            {isSimulating ? '⏳ Generating Signal & Running ML...' : '⚡ Run Household Signal Simulation'}
+          </Text>
+        </Pressable>
+
         {isLoading || !displayedData ? (
           error ? (
             <DashboardErrorState message={error} onRetry={reload} />
@@ -104,4 +135,20 @@ const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.background, flex: 1 },
   content: { gap: spacing.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
   stateContainer: { minHeight: 420 },
+  simButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: spacing.xs,
+  },
+  simButtonDisabled: {
+    opacity: 0.6,
+  },
+  simButtonText: {
+    ...typography.label,
+    color: colors.surface,
+  },
 });

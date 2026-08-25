@@ -16,7 +16,10 @@ export interface ApplianceUsage {
   category: ApplianceCategory;
   consumptionKwh: number;
   sharePercent: number;
-  confidence: 'High' | 'Medium';
+  modelScore?: number;
+  modelScoreLabel?: 'High' | 'Medium' | 'Low' | 'N/A';
+  confidence?: string;
+  notYetTrained?: boolean;
 }
 
 export interface PriorityInsight {

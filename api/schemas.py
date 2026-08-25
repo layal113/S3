@@ -11,16 +11,16 @@ class BaseSchema(BaseModel):
     )
 
 
+# Note: model_score and model_score_label represent raw predicted classifier probabilities, not calibrated accuracy.
 class ApplianceBreakdownItem(BaseSchema):
     category: str = Field(..., description="Category display name or internal key")
     internal_category: str = Field(..., description="Internal taxonomy key, e.g. 'fridge', 'ac_hvac'")
     display_name: str = Field(..., description="Presentation display name, e.g. 'Refrigerator'")
-    consumption_kwh: float = Field(..., description="Consumption in kWh over period")
+    consumption_kwh: float = Field(..., description="Consumption in kWh over window")
     share_percent: float = Field(..., description="Percentage share of total consumption (0-100%)")
-    confidence: str = Field(..., description="Confidence label matching frontend ApplianceUsage interface")
-    confidence_score: float = Field(..., description="Numeric confidence score (0.0 to 1.0)")
-    confidence_label: Literal["High", "Medium", "Low", "N/A"] = Field(
-        ..., description="Confidence tier: High >=0.70, Medium 0.40-0.70, Low <0.40, N/A for untrained"
+    model_score: float = Field(..., description="Raw classifier predicted probability score (0.0 to 1.0)")
+    model_score_label: Literal["High", "Medium", "Low", "N/A"] = Field(
+        ..., description="Raw probability tier: High >=0.70, Medium 0.40-0.70, Low <0.40, N/A for untrained"
     )
     not_yet_trained: bool = Field(
         ..., description="Explicit flag indicating if category is absent/untrained in dataset"
@@ -43,7 +43,7 @@ class BreakdownResponse(BaseSchema):
 
 
 class SimulateUsageRequest(BaseSchema):
-    household_id: Optional[str] = Field(default="synthetic-1")
+    household_id: Optional[str] = Field(default="high-ac-home")
     duration_minutes: Optional[int] = Field(default=60, ge=15, description="Duration in minutes (minimum 15)")
     interval_seconds: Optional[int] = Field(default=60)
 

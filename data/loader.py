@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Tuple, List
 
 from data.config import (
-    RAW_DATA_PATH,
-    PROCESSED_DATA_PATH,
+    RAW_UKDALE_DATA_PATH,
+    PROCESSED_UKDALE_DATA_PATH,
+    RAW_IAWE_DATA_PATH,
+    PROCESSED_IAWE_DATA_PATH,
     ACTIVE_DATASET_PATHS,
     RAW_CATEGORY_MAP,
     SUPPORTED_CATEGORIES,
@@ -14,11 +16,11 @@ from data.config import (
 
 
 def preprocess_raw_dataset(
-    raw_path: Path = RAW_DATA_PATH,
-    processed_path: Path = PROCESSED_DATA_PATH,
+    raw_path: Path,
+    processed_path: Path,
 ) -> Tuple[pd.DataFrame, int]:
     """
-    Reads raw UK-DALE dataset, processes timestamps to uniform UTC, cleans data quality gaps,
+    Reads raw dataset (UK-DALE or IAWE), processes timestamps to uniform UTC, cleans data quality gaps,
     drops redundant identifier columns ('building', 'meter'), remaps taxonomy keys, and
     saves the output to processed_path.
 
@@ -32,11 +34,9 @@ def preprocess_raw_dataset(
     initial_row_count = len(df)
 
     # 1. Convert all timestamps to uniform UTC timezone
-    # Handles mixed offsets (+00:00 / +01:00) cleanly
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
 
     # 2. Exclude rows flagged as "gap" or containing missing power values
-    # mains_power missing or appliance_power missing align with data_quality_flag == 'gap'
     gap_mask = (
         (df["data_quality_flag"] == "gap")
         | df["mains_power"].isna()
@@ -70,28 +70,38 @@ def load_active_datasets(
 ) -> Tuple[pd.DataFrame, int]:
     """
     Loads and concatenates all active datasets specified in ACTIVE_DATASET_PATHS into one DataFrame.
-    Ensures processed file exists, triggering preprocessing if necessary.
+    Ensures processed files exist, triggering preprocessing if necessary.
 
     Returns:
         Tuple[pd.DataFrame, int]: (concatenated_df, total_excluded_gap_rows)
     """
     total_excluded = 0
 
-    # Ensure processed file exists
-    if PROCESSED_DATA_PATH not in active_paths and not PROCESSED_DATA_PATH.exists():
-        if RAW_DATA_PATH.exists():
-            _, total_excluded = preprocess_raw_dataset(RAW_DATA_PATH, PROCESSED_DATA_PATH)
+    # Process UK-DALE if needed
+    if PROCESSED_UKDALE_DATA_PATH in active_paths and not PROCESSED_UKDALE_DATA_PATH.exists():
+        if RAW_UKDALE_DATA_PATH.exists():
+            _, ex1 = preprocess_raw_dataset(RAW_UKDALE_DATA_PATH, PROCESSED_UKDALE_DATA_PATH)
+            total_excluded += ex1
+
+    # Process IAWE if needed
+    if PROCESSED_IAWE_DATA_PATH in active_paths and not PROCESSED_IAWE_DATA_PATH.exists():
+        if RAW_IAWE_DATA_PATH.exists():
+            _, ex2 = preprocess_raw_dataset(RAW_IAWE_DATA_PATH, PROCESSED_IAWE_DATA_PATH)
+            total_excluded += ex2
 
     dfs = []
     for path in active_paths:
         if not path.exists():
-            if path == PROCESSED_DATA_PATH and RAW_DATA_PATH.exists():
-                _, total_excluded = preprocess_raw_dataset(RAW_DATA_PATH, PROCESSED_DATA_PATH)
+            if path == PROCESSED_UKDALE_DATA_PATH and RAW_UKDALE_DATA_PATH.exists():
+                _, ex = preprocess_raw_dataset(RAW_UKDALE_DATA_PATH, PROCESSED_UKDALE_DATA_PATH)
+                total_excluded += ex
+            elif path == PROCESSED_IAWE_DATA_PATH and RAW_IAWE_DATA_PATH.exists():
+                _, ex = preprocess_raw_dataset(RAW_IAWE_DATA_PATH, PROCESSED_IAWE_DATA_PATH)
+                total_excluded += ex
             else:
                 print(f"[data/loader.py] Warning: Active dataset path {path} does not exist. Skipping.")
                 continue
         df_part = pd.read_csv(path)
-        # Ensure UTC datetime parsing
         df_part["timestamp"] = pd.to_datetime(df_part["timestamp"], utc=True)
         dfs.append(df_part)
 
@@ -99,7 +109,6 @@ def load_active_datasets(
         raise RuntimeError("No active datasets could be loaded.")
 
     combined_df = pd.concat(dfs, ignore_index=True)
-    # Sort by timestamp
     combined_df = combined_df.sort_values(by="timestamp").reset_index(drop=True)
 
     print(f"[data/loader.py] Successfully loaded {len(combined_df)} rows from {len(dfs)} active dataset(s).")
@@ -107,8 +116,10 @@ def load_active_datasets(
 
 
 if __name__ == "__main__":
-    # Test loader and preprocessing
-    preprocess_raw_dataset()
+    if RAW_UKDALE_DATA_PATH.exists():
+        preprocess_raw_dataset(RAW_UKDALE_DATA_PATH, PROCESSED_UKDALE_DATA_PATH)
+    if RAW_IAWE_DATA_PATH.exists():
+        preprocess_raw_dataset(RAW_IAWE_DATA_PATH, PROCESSED_IAWE_DATA_PATH)
     df, excluded = load_active_datasets()
     print("Columns:", df.columns.tolist())
     print("Houses:", df["house_id"].unique().tolist())

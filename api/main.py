@@ -29,7 +29,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Configure CORS for Expo dev servers
+# Configure CORS for Expo dev servers, Android Emulator (10.0.2.2), and local LAN IPs
 origins = [
     "http://localhost:8081",
     "http://localhost:19006",
@@ -37,6 +37,8 @@ origins = [
     "http://localhost:8000",
     "http://127.0.0.1:8081",
     "http://127.0.0.1:8000",
+    "http://10.0.2.2:8000",
+    "http://10.0.2.2:8081",
     "*",
 ]
 
@@ -59,6 +61,54 @@ def read_root():
     }
 
 
+def compute_dynamic_recommendation(breakdown_items: List[ApplianceBreakdownItem], duration_minutes: int) -> RecommendationResponse:
+    """
+    Traceable calculation path from detected breakdown consumption to recommended monthly saving:
+    1. Identifies the highest active consuming appliance category from detected breakdown.
+    2. Scales window consumption (kWh) to daily consumption (x 1440 / duration_minutes).
+    3. Projects monthly baseline consumption (daily_kwh * 30 days).
+    4. Calculates 25% potential savings factor (round(monthly_kwh * 0.25, 1)).
+    """
+    # Exclude Other/unclassified if specific appliances exist
+    specific_items = [item for item in breakdown_items if item.internal_category != "other" and not item.not_yet_trained and item.consumption_kwh > 0]
+    target_item = max(specific_items, key=lambda x: x.consumption_kwh) if specific_items else (
+        max(breakdown_items, key=lambda x: x.consumption_kwh) if breakdown_items else None
+    )
+
+    if not target_item or target_item.consumption_kwh == 0:
+        return RecommendationResponse(
+            title="Keep standby usage low overnight",
+            description="Switch off entertainment devices and unused appliances at the socket overnight to save baseline standby power.",
+            estimated_monthly_saving_kwh=12.5,
+        )
+
+    cat = target_item.internal_category
+    daily_kwh = (target_item.consumption_kwh / max(1, duration_minutes)) * 1440.0
+    monthly_kwh = daily_kwh * 30.0
+    saving_kwh = round(monthly_kwh * 0.25, 1)
+    if saving_kwh <= 0:
+        saving_kwh = 15.0
+
+    if cat == "ac_hvac":
+        title = "Optimize Air Conditioner runtime & set thermostat to 24°C"
+        desc = f"Air Conditioning represents your highest active load ({target_item.share_percent}% of usage). Raising thermostat by 1-2°C can save up to {saving_kwh} kWh per month."
+    elif cat == "fridge":
+        title = "Optimize Refrigerator cooling temperature"
+        desc = f"Refrigerator represents your primary continuous baseline load ({target_item.share_percent}% of usage). Maintaining efficient door seals and cooling settings can save up to {saving_kwh} kWh per month."
+    elif cat == "lighting":
+        title = "Upgrade to LED lighting & turn off unused lights"
+        desc = f"Lighting accounts for {target_item.share_percent}% of active consumption. Replacing halogen bulbs with LEDs can save up to {saving_kwh} kWh per month."
+    else:
+        title = f"Reduce peak {target_item.display_name} consumption"
+        desc = f"{target_item.display_name} accounts for {target_item.share_percent}% of active energy draw. Optimizing daily usage hours can save up to {saving_kwh} kWh per month."
+
+    return RecommendationResponse(
+        title=title,
+        description=desc,
+        estimated_monthly_saving_kwh=saving_kwh,
+    )
+
+
 # =====================================================================
 # 1. STANDALONE MODEL UTILITY ENDPOINTS
 # =====================================================================
@@ -69,7 +119,7 @@ def simulate_usage(request: SimulateUsageRequest = Body(...)):
     Generates synthetic aggregate power signal for a fake household.
     """
     df = generate_synthetic_household(
-        household_id=request.household_id or "synthetic-1",
+        household_id=request.household_id or "high-ac-home",
         duration_minutes=request.duration_minutes or 60,
         interval_seconds=request.interval_seconds or 60,
     )
@@ -83,13 +133,14 @@ def simulate_usage(request: SimulateUsageRequest = Body(...)):
                 appliances={
                     "fridge": float(row["fridge"]),
                     "lighting": float(row["lighting"]),
+                    "ac_hvac": float(row.get("ac_hvac", 0.0)),
                     "other": float(row["other"]),
                 },
             )
         )
 
     return SimulateUsageResponse(
-        household_id=request.household_id or "synthetic-1",
+        household_id=request.household_id or "high-ac-home",
         timestamp_start=df.iloc[0]["timestamp"],
         timestamp_end=df.iloc[-1]["timestamp"],
         reading_count=len(readings),
@@ -100,7 +151,7 @@ def simulate_usage(request: SimulateUsageRequest = Body(...)):
 @app.post("/get-breakdown", response_model=BreakdownResponse)
 def get_breakdown(request: BreakdownRequest):
     """
-    Takes raw aggregate power time series input (minimum 15 readings) and returns model disaggregation breakdown.
+    Takes raw aggregate power time series input (minimum 15 readings) and returns model disaggregation breakdown with integrated kWh values.
     """
     if len(request.readings) < MINIMUM_FEATURE_WINDOW_SIZE:
         raise HTTPException(
@@ -111,7 +162,6 @@ def get_breakdown(request: BreakdownRequest):
             ),
         )
 
-    # Convert request readings to DataFrame
     rows = []
     for r in request.readings:
         p_val = r.get("mains_power") if r.get("mains_power") is not None else r.get("mainsPower")
@@ -140,11 +190,11 @@ def get_breakdown(request: BreakdownRequest):
 
 
 @app.get("/get-breakdown", response_model=BreakdownResponse)
-def get_breakdown_demo():
+def get_breakdown_demo(household_id: str = "high-ac-home"):
     """
-    GET fallback for /get-breakdown: generates a synthetic 20-minute window and runs real ML inference.
+    GET fallback for /get-breakdown: generates synthetic 20-minute window for household and runs real ML inference.
     """
-    df_sim = generate_synthetic_household(duration_minutes=20)
+    df_sim = generate_synthetic_household(household_id=household_id, duration_minutes=20)
     res = predict_disaggregation(df_sim)
     items = [ApplianceBreakdownItem(**item) for item in res["appliance_breakdown"]]
 
@@ -158,17 +208,13 @@ def get_breakdown_demo():
 
 
 @app.get("/get-recommendation", response_model=RecommendationResponse)
-
 @app.post("/get-recommendation", response_model=RecommendationResponse)
 def get_recommendation():
     """
-    Returns energy-saving recommendation based on current appliance consumption profile.
+    Calculates dynamic recommendation derived from active disaggregation breakdown.
     """
-    return RecommendationResponse(
-        title="Optimize evening lighting and standby loads",
-        description="Lighting and baseline background loads represent your highest active consumption. Switching off standby devices overnight can save up to 25.5 kWh per month.",
-        estimated_monthly_saving_kwh=25.5,
-    )
+    demo_breakdown = get_breakdown_demo("high-ac-home")
+    return compute_dynamic_recommendation(demo_breakdown.appliance_breakdown, demo_breakdown.duration_minutes)
 
 
 # =====================================================================
@@ -186,21 +232,22 @@ def get_households():
 
 @app.get("/v1/households/{household_id}/appliances/usage", response_model=BreakdownResponse)
 def get_household_appliance_usage(household_id: str):
-    return get_breakdown_demo()
+    return get_breakdown_demo(household_id=household_id)
 
 
 @app.get("/v1/households/{household_id}/recommendations", response_model=RecommendationResponse)
 def get_household_recommendations(household_id: str):
-    return get_recommendation()
+    demo_breakdown = get_breakdown_demo(household_id=household_id)
+    return compute_dynamic_recommendation(demo_breakdown.appliance_breakdown, demo_breakdown.duration_minutes)
 
 
 @app.get("/v1/households/{household_id}/dashboard", response_model=DashboardResponse)
 def get_dashboard(household_id: str):
     """
-    Combined server-side response aggregating breakdown, recommendations, tariff status, and current bill metrics.
+    Combined server-side response aggregating breakdown, dynamic recommendation, tariff status, and bill metrics.
     """
-    breakdown_data = get_breakdown_demo()
-    rec_data = get_recommendation()
+    breakdown_data = get_breakdown_demo(household_id=household_id)
+    rec_data = compute_dynamic_recommendation(breakdown_data.appliance_breakdown, breakdown_data.duration_minutes)
 
     return DashboardResponse(
         household_id=household_id,
@@ -214,8 +261,8 @@ def get_dashboard(household_id: str):
         change_from_previous_month_percent=17.0,
         priority_insight=PriorityInsight(
             kind="warning",
-            title="High baseline usage detected",
-            message="Lighting and standby loads are driving your projected bill above last month.",
+            title=rec_data.title,
+            message=rec_data.description,
         ),
         tariff_status=TariffStatus(
             current_tier=4,
@@ -252,11 +299,11 @@ def get_usage_history(household_id: str, period: str = Query("7d")):
                 baselineKWh=15.0,
                 baselineCostEGP=15.0 * 2.15,
                 appliances={
-                    "airConditioner": {"kWh": 0.0, "costEGP": 0.0},
+                    "airConditioner": {"kWh": kwh * 0.40 if household_id == "high-ac-home" else 0.0, "costEGP": cost * 0.40 if household_id == "high-ac-home" else 0.0},
                     "waterHeater": {"kWh": 0.0, "costEGP": 0.0},
-                    "refrigerator": {"kWh": kwh * 0.30, "costEGP": cost * 0.30},
-                    "lighting": {"kWh": kwh * 0.25, "costEGP": cost * 0.25},
-                    "other": {"kWh": kwh * 0.45, "costEGP": cost * 0.45},
+                    "refrigerator": {"kWh": kwh * 0.20, "costEGP": cost * 0.20},
+                    "lighting": {"kWh": kwh * 0.15, "costEGP": cost * 0.15},
+                    "other": {"kWh": kwh * 0.25, "costEGP": cost * 0.25},
                 },
             )
         )
