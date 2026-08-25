@@ -60,16 +60,16 @@ export function DashboardScreen({
 
   const displayedData = data
     ? {
-        ...data,
-        householdName: selectedProfile.householdName,
-        billingPeriodLabel: `Starts ${selectedProfile.billingCycleStart}`,
-        simulated: selectedProfile.simulated,
-        tariffStatus: {
-          ...data.tariffStatus,
-          currentTier: selectedProfile.tariffTier,
-          nextTier: selectedProfile.tariffTier + 1,
-        },
-      }
+      ...data,
+      householdName: selectedProfile.householdName,
+      billingPeriodLabel: `Starts ${selectedProfile.billingCycleStart}`,
+      simulated: selectedProfile.simulated,
+      tariffStatus: {
+        ...data.tariffStatus,
+        currentTier: selectedProfile.tariffTier,
+        nextTier: selectedProfile.tariffTier + 1,
+      },
+    }
     : null;
 
   return (
@@ -90,7 +90,7 @@ export function DashboardScreen({
           disabled={isSimulating}
         >
           <Text style={styles.simButtonText}>
-            {isSimulating ? '⏳ Generating Signal & Running ML...' : '⚡ Run Household Signal Simulation'}
+            {isSimulating ? '⏳ Generating Signal & Running ML...' : ' Run Household Signal Simulation'}
           </Text>
         </Pressable>
 
