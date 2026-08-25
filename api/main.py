@@ -1,4 +1,10 @@
-from fastapi import FastAPI, HTTPException, Query, Body, status
+import logging
+import os
+import time
+import uuid
+import calendar
+
+from fastapi import FastAPI, HTTPException, Query, Body, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 from datetime import datetime
@@ -22,6 +28,33 @@ from api.schemas import (
 from simulator.generate_household import generate_synthetic_household
 from model.predict import predict_disaggregation
 from data.config import MINIMUM_FEATURE_WINDOW_SIZE, CATEGORY_DISPLAY_NAMES
+
+logging.basicConfig(
+    level=os.getenv("MIQYAS_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("miqyas.api")
+DEBUG_BREAKPOINTS_ENABLED = os.getenv("MIQYAS_DEBUG_BREAKPOINTS") == "1"
+ESTIMATED_EGP_PER_KWH = float(os.getenv("MIQYAS_EGP_PER_KWH", "2.15"))
+TARIFF_THRESHOLDS_KWH = [50.0, 100.0, 200.0, 350.0, 650.0, 1000.0]
+latest_breakdowns: Dict[str, BreakdownResponse] = {}
+previous_projected_kwh: Dict[str, float] = {}
+
+
+def debug_checkpoint(label: str, **context: Any) -> None:
+    """Log a pipeline checkpoint and optionally enter pdb when explicitly enabled."""
+    context_text = " ".join(f"{key}={value}" for key, value in context.items())
+    logger.info("CHECKPOINT %s %s", label, context_text)
+    if DEBUG_BREAKPOINTS_ENABLED:
+        logger.warning("Debugger breakpoint reached: %s", label)
+        breakpoint()
+
+
+print(
+    "[Miqyas API] Debug logging ready "
+    f"(breakpoints={'enabled' if DEBUG_BREAKPOINTS_ENABLED else 'disabled'}).",
+    flush=True,
+)
 
 app = FastAPI(
     title="Miqyas Appliance Disaggregation ML API",
@@ -49,6 +82,39 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def log_http_request(request: Request, call_next):
+    request_id = request.headers.get("x-request-id", uuid.uuid4().hex[:8])
+    started_at = time.perf_counter()
+    logger.info(
+        "REQUEST id=%s method=%s path=%s client=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        request.client.host if request.client else "unknown",
+    )
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        logger.exception(
+            "RESPONSE id=%s status=500 duration_ms=%.1f",
+            request_id,
+            elapsed_ms,
+        )
+        raise
+
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    response.headers["x-request-id"] = request_id
+    logger.info(
+        "RESPONSE id=%s status=%s duration_ms=%.1f",
+        request_id,
+        response.status_code,
+        elapsed_ms,
+    )
+    return response
 
 
 @app.get("/")
@@ -109,6 +175,74 @@ def compute_dynamic_recommendation(breakdown_items: List[ApplianceBreakdownItem]
     )
 
 
+def project_breakdown_to_month(breakdown: BreakdownResponse) -> Dict[str, float]:
+    """Scale the measured backend window to billing-period and month estimates."""
+    now = datetime.utcnow()
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    elapsed_days = max(1, now.day)
+    measured_minutes = max(1, breakdown.duration_minutes)
+    daily_kwh = breakdown.total_consumption_kwh * (1440.0 / measured_minutes)
+    return {
+        "current_kwh": round(daily_kwh * elapsed_days, 1),
+        "projected_kwh": round(daily_kwh * days_in_month, 1),
+        "days_in_month": float(days_in_month),
+        "elapsed_days": float(elapsed_days),
+    }
+
+
+def calculate_tariff_status(current_kwh: float, projected_kwh: float) -> TariffStatus:
+    current_tier = len(TARIFF_THRESHOLDS_KWH) + 1
+    next_threshold = TARIFF_THRESHOLDS_KWH[-1] + 500.0
+    for index, threshold in enumerate(TARIFF_THRESHOLDS_KWH):
+        if current_kwh < threshold:
+            current_tier = index + 1
+            next_threshold = threshold
+            break
+
+    next_tier = current_tier + 1
+    remaining_kwh = max(0.0, next_threshold - current_kwh)
+    level_percent = min(100.0, (current_kwh / next_threshold) * 100.0)
+    projected_to_exceed = projected_kwh >= next_threshold
+    return TariffStatus(
+        current_tier=current_tier,
+        next_tier=next_tier,
+        status_label=(
+            "Projected to exceed next tier"
+            if projected_to_exceed
+            else "Within current tier"
+        ),
+        detail=f"{remaining_kwh:.1f} kWh remaining before the next tariff tier.",
+        level_percent=round(level_percent, 1),
+        remaining_kwh=round(remaining_kwh, 1),
+        projected_to_exceed=projected_to_exceed,
+    )
+
+
+def remember_breakdown(household_id: str, breakdown: BreakdownResponse) -> None:
+    existing = latest_breakdowns.get(household_id)
+    if existing:
+        previous_projected_kwh[household_id] = project_breakdown_to_month(existing)[
+            "projected_kwh"
+        ]
+    latest_breakdowns[household_id] = breakdown
+    debug_checkpoint(
+        "breakdown.stored",
+        household_id=household_id,
+        total_kwh=breakdown.total_consumption_kwh,
+    )
+
+
+def get_latest_breakdown(household_id: str) -> BreakdownResponse:
+    existing = latest_breakdowns.get(household_id)
+    if existing:
+        return existing
+
+    logger.info("No stored readings for %s; generating initial backend window", household_id)
+    generated = create_demo_breakdown(household_id)
+    latest_breakdowns[household_id] = generated
+    return generated
+
+
 # =====================================================================
 # 1. STANDALONE MODEL UTILITY ENDPOINTS
 # =====================================================================
@@ -118,11 +252,21 @@ def simulate_usage(request: SimulateUsageRequest = Body(...)):
     """
     Generates synthetic aggregate power signal for a fake household.
     """
-    df = generate_synthetic_household(
-        household_id=request.household_id or "high-ac-home",
-        duration_minutes=request.duration_minutes or 60,
-        interval_seconds=request.interval_seconds or 60,
+    household_id = request.household_id or "high-ac-home"
+    duration_minutes = request.duration_minutes or 60
+    interval_seconds = request.interval_seconds or 60
+    debug_checkpoint(
+        "simulation.start",
+        household_id=household_id,
+        duration_minutes=duration_minutes,
+        interval_seconds=interval_seconds,
     )
+    df = generate_synthetic_household(
+        household_id=household_id,
+        duration_minutes=duration_minutes,
+        interval_seconds=interval_seconds,
+    )
+    debug_checkpoint("simulation.generated", readings=len(df))
 
     readings = []
     for _, row in df.iterrows():
@@ -139,13 +283,15 @@ def simulate_usage(request: SimulateUsageRequest = Body(...)):
             )
         )
 
-    return SimulateUsageResponse(
-        household_id=request.household_id or "high-ac-home",
+    response = SimulateUsageResponse(
+        household_id=household_id,
         timestamp_start=df.iloc[0]["timestamp"],
         timestamp_end=df.iloc[-1]["timestamp"],
         reading_count=len(readings),
         readings=readings,
     )
+    debug_checkpoint("simulation.complete", readings=len(readings))
+    return response
 
 
 @app.post("/get-breakdown", response_model=BreakdownResponse)
@@ -153,7 +299,13 @@ def get_breakdown(request: BreakdownRequest):
     """
     Takes raw aggregate power time series input (minimum 15 readings) and returns model disaggregation breakdown with integrated kWh values.
     """
+    debug_checkpoint("breakdown.received", readings=len(request.readings))
     if len(request.readings) < MINIMUM_FEATURE_WINDOW_SIZE:
+        logger.warning(
+            "Breakdown rejected: readings=%s required=%s",
+            len(request.readings),
+            MINIMUM_FEATURE_WINDOW_SIZE,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -174,26 +326,33 @@ def get_breakdown(request: BreakdownRequest):
     df_input = pd.DataFrame(rows)
 
     try:
+        debug_checkpoint("breakdown.model.start", rows=len(df_input))
         res = predict_disaggregation(df_input)
+        debug_checkpoint(
+            "breakdown.model.complete",
+            categories=len(res["appliance_breakdown"]),
+            total_kwh=res["total_consumption_kwh"],
+        )
     except ValueError as err:
+        logger.exception("Model input rejected")
         raise HTTPException(status_code=400, detail=str(err))
 
     items = [ApplianceBreakdownItem(**item) for item in res["appliance_breakdown"]]
 
-    return BreakdownResponse(
+    response = BreakdownResponse(
         timestamp=res["timestamp"],
         duration_minutes=res["duration_minutes"],
         total_consumption_kwh=res["total_consumption_kwh"],
         appliance_breakdown=items,
         simulated=False,
     )
+    remember_breakdown(request.household_id or "high-ac-home", response)
+    return response
 
 
-@app.get("/get-breakdown", response_model=BreakdownResponse)
-def get_breakdown_demo(household_id: str = "high-ac-home"):
-    """
-    GET fallback for /get-breakdown: generates synthetic 20-minute window for household and runs real ML inference.
-    """
+def create_demo_breakdown(household_id: str) -> BreakdownResponse:
+    """Create an initial backend measurement window when no reading was submitted yet."""
+    debug_checkpoint("breakdown.demo.start", household_id=household_id)
     df_sim = generate_synthetic_household(household_id=household_id, duration_minutes=20)
     res = predict_disaggregation(df_sim)
     items = [ApplianceBreakdownItem(**item) for item in res["appliance_breakdown"]]
@@ -205,6 +364,12 @@ def get_breakdown_demo(household_id: str = "high-ac-home"):
         appliance_breakdown=items,
         simulated=True,
     )
+
+
+@app.get("/get-breakdown", response_model=BreakdownResponse)
+def get_breakdown_demo(household_id: str = "high-ac-home"):
+    """Return the household's latest backend breakdown."""
+    return get_latest_breakdown(household_id)
 
 
 @app.get("/get-recommendation", response_model=RecommendationResponse)
@@ -232,7 +397,7 @@ def get_households():
 
 @app.get("/v1/households/{household_id}/appliances/usage", response_model=BreakdownResponse)
 def get_household_appliance_usage(household_id: str):
-    return get_breakdown_demo(household_id=household_id)
+    return get_latest_breakdown(household_id)
 
 
 @app.get("/v1/households/{household_id}/recommendations", response_model=RecommendationResponse)
@@ -246,38 +411,71 @@ def get_dashboard(household_id: str):
     """
     Combined server-side response aggregating breakdown, dynamic recommendation, tariff status, and bill metrics.
     """
-    breakdown_data = get_breakdown_demo(household_id=household_id)
+    debug_checkpoint("dashboard.start", household_id=household_id)
+    breakdown_data = get_latest_breakdown(household_id)
+    projection = project_breakdown_to_month(breakdown_data)
+    current_kwh = projection["current_kwh"]
+    projected_kwh = projection["projected_kwh"]
+    previous_kwh = previous_projected_kwh.get(household_id, projected_kwh)
+    current_cost = round(current_kwh * ESTIMATED_EGP_PER_KWH, 1)
+    predicted_bill = round(projected_kwh * ESTIMATED_EGP_PER_KWH, 1)
+    previous_bill = round(previous_kwh * ESTIMATED_EGP_PER_KWH, 1)
+    change_percent = (
+        round(((projected_kwh - previous_kwh) / previous_kwh) * 100.0, 1)
+        if previous_kwh > 0
+        else 0.0
+    )
+    tariff_status = calculate_tariff_status(current_kwh, projected_kwh)
+    billing_scale = (
+        1440.0 / max(1, breakdown_data.duration_minutes)
+    ) * projection["elapsed_days"]
+    scaled_appliances = [
+        item.model_copy(
+            update={
+                "consumption_kwh": round(item.consumption_kwh * billing_scale, 1)
+            }
+        )
+        for item in breakdown_data.appliance_breakdown
+    ]
     rec_data = compute_dynamic_recommendation(breakdown_data.appliance_breakdown, breakdown_data.duration_minutes)
+    now = datetime.utcnow()
+    household_names = {
+        "high-ac-home": "Ahmed’s Home",
+        "efficient-flat": "Nour’s Flat",
+        "family-villa": "Family Villa",
+    }
 
-    return DashboardResponse(
+    response = DashboardResponse(
         household_id=household_id,
-        household_name=f"{household_id.replace('-', ' ').title()}",
-        billing_period_label="1–31 August 2026",
-        current_consumption_kwh=382.0,
-        current_estimated_cost_egp=820.0,
-        predicted_month_end_bill_egp=1430.0,
-        projected_monthly_kwh=545.0,
-        previous_month_bill_egp=1222.0,
-        change_from_previous_month_percent=17.0,
+        household_name=household_names.get(
+            household_id, household_id.replace("-", " ").title()
+        ),
+        billing_period_label=(
+            f"1–{int(projection['days_in_month'])} {now.strftime('%B %Y')}"
+        ),
+        current_consumption_kwh=current_kwh,
+        current_estimated_cost_egp=current_cost,
+        predicted_month_end_bill_egp=predicted_bill,
+        projected_monthly_kwh=projected_kwh,
+        previous_month_bill_egp=previous_bill,
+        change_from_previous_month_percent=change_percent,
         priority_insight=PriorityInsight(
-            kind="warning",
+            kind=("warning" if tariff_status.projected_to_exceed else "recommendation"),
             title=rec_data.title,
             message=rec_data.description,
         ),
-        tariff_status=TariffStatus(
-            current_tier=4,
-            next_tier=5,
-            status_label="Approaching next tier",
-            detail="68 kWh remaining before the next simulated tariff tier.",
-            level_percent=85.0,
-            remaining_kwh=68.0,
-            projected_to_exceed=False,
-        ),
-        appliance_breakdown=breakdown_data.appliance_breakdown,
+        tariff_status=tariff_status,
+        appliance_breakdown=scaled_appliances,
         recommendation=rec_data,
-        simulated=True,
-        updated_at=datetime.utcnow().isoformat() + "Z",
+        simulated=breakdown_data.simulated,
+        updated_at=now.isoformat() + "Z",
     )
+    debug_checkpoint(
+        "dashboard.complete",
+        household_id=household_id,
+        appliances=len(response.appliance_breakdown),
+    )
+    return response
 
 
 @app.get("/v1/households/{household_id}/usage/history", response_model=UsageHistoryResponse)
