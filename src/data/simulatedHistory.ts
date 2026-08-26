@@ -29,7 +29,7 @@ function point(
   };
 }
 
-export const simulatedHistory: Record<'7d' | '4w', UsageHistoryData> = {
+export const simulatedHistory: Record<'7d' | '4w' | '6m', UsageHistoryData> = {
   '7d': {
     period: '7d',
     granularity: 'day',
@@ -61,6 +61,23 @@ export const simulatedHistory: Record<'7d' | '4w', UsageHistoryData> = {
         explanation:
           'The 19 August AC spike raised this week and influenced the current bill forecast.',
       }),
+    ],
+  },
+  '6m': {
+    period: '6m',
+    granularity: 'month',
+    dateRangeLabel: 'March–August 2026',
+    points: [
+      point('2026-03-01', 318, 325, 0.25),
+      point('2026-04-01', 334, 330, 0.27),
+      point('2026-05-01', 371, 342, 0.32),
+      point('2026-06-01', 419, 360, 0.38),
+      point('2026-07-01', 492, 385, 0.48, {
+        title: 'Summer AC increase',
+        explanation:
+          'Air-conditioner usage rose during July and continued to influence the August forecast.',
+      }),
+      point('2026-08-01', 458, 410, 0.44),
     ],
   },
 };

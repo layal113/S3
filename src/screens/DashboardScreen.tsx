@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -121,6 +122,19 @@ export function DashboardScreen({
             />
           </>
         )}
+        <View
+          accessible
+          accessibilityLabel="Support hotline, 16016"
+          style={styles.hotline}
+        >
+          <View style={styles.hotlineCopy}>
+            <Text style={styles.hotlineLabel}>SUPPORT HOTLINE</Text>
+            <View style={styles.hotlineNumberRow}>
+              <Ionicons color={colors.teal} name="call-outline" size={18} />
+              <Text style={styles.hotlineNumber}>16016</Text>
+            </View>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -145,5 +159,30 @@ const styles = StyleSheet.create({
   simButtonText: {
     ...typography.label,
     color: colors.surface,
+  },
+  hotline: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.md,
+  },
+  hotlineCopy: { alignItems: 'center' },
+  hotlineNumberRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  hotlineLabel: {
+    ...typography.label,
+    color: colors.textMuted,
+    fontSize: 10,
+    letterSpacing: 0.7,
+  },
+  hotlineNumber: {
+    ...typography.body,
+    color: colors.primaryDark,
+    textAlign: 'center',
   },
 });

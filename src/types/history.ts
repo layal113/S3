@@ -1,4 +1,4 @@
-export type HistoryPeriod = '7d' | '4w';
+export type HistoryPeriod = '7d' | '4w' | '6m';
 export type HistoryUnit = 'kwh' | 'egp';
 export type HistoryAppliance =
   | 'total'
@@ -23,7 +23,7 @@ export interface HistoryPoint {
 
 export interface UsageHistoryData {
   period: HistoryPeriod;
-  granularity: 'day' | 'week';
+  granularity: 'day' | 'week' | 'month';
   dateRangeLabel: string;
   points: HistoryPoint[];
 }

@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import { Platform, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlaceholderScreen } from '../screens/PlaceholderScreen';
@@ -62,6 +63,8 @@ export function RootNavigator({
   historyService: HistoryService;
 }) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isMobileWeb = Platform.OS === 'web' && width <= 768;
   const { selectedHouseholdId } = useHouseholdProfile();
 
   return (
@@ -77,6 +80,7 @@ export function RootNavigator({
             ...shadows.card,
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
+            marginBottom: isMobileWeb ? 56 : 0,
             minHeight: 60,
             paddingBottom: 6,
             paddingTop: 8,

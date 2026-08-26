@@ -127,6 +127,7 @@ export function UsageHistoryScreen({
           items={[
             { id: '7d', label: '7 days' },
             { id: '4w', label: '4 weeks' },
+            { id: '6m', label: '6 months' },
           ]}
           value={period}
           onChange={setPeriod}
@@ -201,7 +202,12 @@ export function UsageHistoryScreen({
                     {appliances.find((item) => item.id === appliance)?.label}
                   </Text>
                   <Text style={styles.range}>
-                    {currentData.dateRangeLabel} · {currentData.granularity}ly
+                    {currentData.dateRangeLabel} ·{' '}
+                    {currentData.granularity === 'day'
+                      ? 'daily'
+                      : currentData.granularity === 'week'
+                        ? 'weekly'
+                        : 'monthly'}
                   </Text>
                 </View>
                 <Text style={styles.unit}>

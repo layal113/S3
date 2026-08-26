@@ -126,7 +126,7 @@ class HistoryPoint(BaseModel):
 
 
 class UsageHistoryResponse(BaseSchema):
-    period: Literal["7d", "4w"]
-    granularity: Literal["day", "week"]
+    period: Literal["7d", "4w", "6m"]
+    granularity: Literal["day", "week", "month"]
     date_range_label: str
     points: List[HistoryPoint]

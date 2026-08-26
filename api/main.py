@@ -492,19 +492,61 @@ def get_usage_history(household_id: str, period: str = Query("7d")):
     """
     Aggregated usage history time series matching UsageHistoryData contract.
     """
-    dates = ["2026-08-16", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-22"]
+    if period == "6m":
+        selected_period = "6m"
+        granularity = "month"
+        date_range_label = "March–August 2026"
+        series = [
+            ("2026-03-01", 318.0, 325.0),
+            ("2026-04-01", 334.0, 330.0),
+            ("2026-05-01", 371.0, 342.0),
+            ("2026-06-01", 419.0, 360.0),
+            ("2026-07-01", 492.0, 385.0),
+            ("2026-08-01", 458.0, 410.0),
+        ]
+    elif period == "4w":
+        selected_period = "4w"
+        granularity = "week"
+        date_range_label = "26 July–22 August 2026"
+        series = [
+            ("2026-07-26", 101.0, 98.0),
+            ("2026-08-02", 108.0, 100.0),
+            ("2026-08-09", 116.0, 102.0),
+            ("2026-08-16", 124.0, 104.0),
+        ]
+    else:
+        selected_period = "7d"
+        granularity = "day"
+        date_range_label = "16–22 August 2026"
+        series = [
+            ("2026-08-16", 15.2, 15.0),
+            ("2026-08-17", 14.7, 15.0),
+            ("2026-08-18", 16.1, 15.1),
+            ("2026-08-19", 24.8, 15.2),
+            ("2026-08-20", 19.3, 15.3),
+            ("2026-08-21", 17.2, 15.4),
+            ("2026-08-22", 16.5, 15.5),
+        ]
     points = []
 
-    for d in dates:
-        kwh = 16.0
+    for index, (date, kwh, baseline_kwh) in enumerate(series):
         cost = kwh * 2.15
+        anomaly = None
+        if selected_period == "6m" and index == 4:
+            anomaly = {
+                "title": "Summer AC increase",
+                "explanation": (
+                    "Air-conditioner usage rose during July and continued "
+                    "to influence the August forecast."
+                ),
+            }
         points.append(
             HistoryPoint(
-                timestamp=d,
+                timestamp=date,
                 totalKWh=kwh,
                 estimatedCostEGP=cost,
-                baselineKWh=15.0,
-                baselineCostEGP=15.0 * 2.15,
+                baselineKWh=baseline_kwh,
+                baselineCostEGP=baseline_kwh * 2.15,
                 appliances={
                     "airConditioner": {"kWh": kwh * 0.40 if household_id == "high-ac-home" else 0.0, "costEGP": cost * 0.40 if household_id == "high-ac-home" else 0.0},
                     "waterHeater": {"kWh": 0.0, "costEGP": 0.0},
@@ -512,12 +554,13 @@ def get_usage_history(household_id: str, period: str = Query("7d")):
                     "lighting": {"kWh": kwh * 0.15, "costEGP": cost * 0.15},
                     "other": {"kWh": kwh * 0.25, "costEGP": cost * 0.25},
                 },
+                anomaly=anomaly,
             )
         )
 
     return UsageHistoryResponse(
-        period="7d" if period == "7d" else "4w",
-        granularity="day",
-        date_range_label="16–22 August 2026",
+        period=selected_period,
+        granularity=granularity,
+        date_range_label=date_range_label,
         points=points,
     )

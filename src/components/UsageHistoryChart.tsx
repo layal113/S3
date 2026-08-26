@@ -57,6 +57,11 @@ export function UsageHistoryChart({
     .join(' ');
   const selected = points[selectedIndex];
   const unitLabel = unit === 'kwh' ? 'kWh' : 'EGP';
+  const spansMultipleMonths =
+    points.length > 1 &&
+    new Date(points[points.length - 1].timestamp).getTime() -
+      new Date(points[0].timestamp).getTime() >
+      45 * 24 * 60 * 60 * 1000;
 
   return (
     <View style={styles.container}>
@@ -130,8 +135,9 @@ export function UsageHistoryChart({
             y={height - 10}
           >
             {new Date(item.timestamp).toLocaleDateString('en-EG', {
-              day: 'numeric',
-              month: points.length <= 4 ? 'short' : undefined,
+              day: spansMultipleMonths ? undefined : 'numeric',
+              month:
+                spansMultipleMonths || points.length <= 4 ? 'short' : undefined,
             })}
           </SvgText>
         ))}
@@ -178,6 +184,7 @@ export function UsageHistoryChart({
             onPress={() => onSelect(index)}
             style={[
               styles.pointButton,
+              spansMultipleMonths && styles.monthPointButton,
               index === selectedIndex && styles.selectedPoint,
             ]}
           >
@@ -187,7 +194,11 @@ export function UsageHistoryChart({
                 index === selectedIndex && styles.selectedPointText,
               ]}
             >
-              {index + 1}
+              {spansMultipleMonths
+                ? new Date(item.timestamp).toLocaleDateString('en-EG', {
+                    month: 'short',
+                  })
+                : index + 1}
             </Text>
           </Pressable>
         ))}
@@ -234,6 +245,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 36,
   },
+  monthPointButton: { width: 48 },
   selectedPoint: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
