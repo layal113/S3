@@ -32,8 +32,13 @@ export function DashboardScreen({
   onProfilePress: () => void;
 }) {
   const [isSimulating, setIsSimulating] = useState(false);
-  const { profiles, selectedHouseholdId, selectedProfile, selectHousehold } =
-    useHouseholdProfile();
+  const {
+    profiles,
+    selectedHouseholdId,
+    selectedProfile,
+    selectHousehold,
+    notifyHouseholdDataChanged,
+  } = useHouseholdProfile();
   const households = service.getHouseholds().map((household) => ({
     ...household,
     name: profiles[household.id].householdName,
@@ -48,6 +53,7 @@ export function DashboardScreen({
       try {
         setIsSimulating(true);
         await service.triggerSimulation(selectedHouseholdId);
+        notifyHouseholdDataChanged(selectedHouseholdId);
         await reload();
       } catch (err) {
         console.warn('Simulation trigger failed:', err);

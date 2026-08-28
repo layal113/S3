@@ -130,3 +130,40 @@ class UsageHistoryResponse(BaseSchema):
     granularity: Literal["day", "week", "month"]
     date_range_label: str
     points: List[HistoryPoint]
+
+
+class SmartTip(BaseSchema):
+    id: str
+    title: str
+    summary: str
+    estimated_savings: str
+    category: Literal["heating", "cooling", "appliances", "lighting", "behavior"]
+
+
+class SmartTipsResponse(BaseSchema):
+    tips: List[SmartTip]
+
+
+class SmartTipsRequest(BaseSchema):
+    household_id: str
+    home_type: str
+    occupants: int
+    avg_kwh: float
+    anomalies_summary: str
+    peak_hours: str
+
+
+class TipChatMessage(BaseSchema):
+    role: Literal["user", "model"]
+    text: str
+
+
+class TipChatRequest(BaseSchema):
+    tip: SmartTip
+    household_data: SmartTipsRequest
+    conversation_history: List[TipChatMessage]
+    user_message: str
+
+
+class TipChatResponse(BaseSchema):
+    message: str

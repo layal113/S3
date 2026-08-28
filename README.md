@@ -36,7 +36,16 @@ Copy `.env.example` to `.env` for local configuration:
 cp .env.example .env
 ```
 
-The future backend base URL is configured with `EXPO_PUBLIC_API_BASE_URL`. Values prefixed with `EXPO_PUBLIC_` are embedded in the client bundle and must never contain secrets.
+The backend base URL is configured with `EXPO_PUBLIC_API_BASE_URL`. Values prefixed with `EXPO_PUBLIC_` are embedded in the client bundle and must never contain secrets.
+
+Smart Tips calls Gemini through FastAPI so the API key never enters the mobile bundle. Set `GEMINI_API_KEY` only in the backend environment, then start the API and Expo in separate terminals:
+
+```sh
+export GEMINI_API_KEY="your-key"
+python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+`GEMINI_MODEL` is optional and defaults to `gemini-3.1-flash-lite`.
 
 ## Architecture
 

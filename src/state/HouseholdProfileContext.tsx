@@ -31,7 +31,9 @@ interface PersistedProfileState {
 
 interface HouseholdProfileContextValue extends PersistedProfileState {
   selectedProfile: HouseholdProfile;
+  dataRevision: number;
   selectHousehold: (householdId: HouseholdId) => void;
+  notifyHouseholdDataChanged: (householdId: HouseholdId) => void;
   updateSelectedProfile: (updates: Partial<HouseholdProfile>) => void;
 }
 
@@ -114,6 +116,9 @@ export function HouseholdProfileProvider({
   const [profiles, setProfiles] = useState(defaultProfiles);
   const [selectedHouseholdId, setSelectedHouseholdId] =
     useState<HouseholdId>('high-ac-home');
+  const [dataRevisions, setDataRevisions] = useState<
+    Record<HouseholdId, number>
+  >({ 'high-ac-home': 0, 'efficient-flat': 0, 'family-villa': 0 });
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -149,6 +154,13 @@ export function HouseholdProfileProvider({
     setSelectedHouseholdId(householdId);
   }, []);
 
+  const notifyHouseholdDataChanged = useCallback((householdId: HouseholdId) => {
+    setDataRevisions((current) => ({
+      ...current,
+      [householdId]: current[householdId] + 1,
+    }));
+  }, []);
+
   const updateSelectedProfile = useCallback(
     (updates: Partial<HouseholdProfile>) => {
       setProfiles((current) => ({
@@ -167,10 +179,19 @@ export function HouseholdProfileProvider({
       profiles,
       selectedHouseholdId,
       selectedProfile: profiles[selectedHouseholdId],
+      dataRevision: dataRevisions[selectedHouseholdId],
       selectHousehold,
+      notifyHouseholdDataChanged,
       updateSelectedProfile,
     }),
-    [profiles, selectHousehold, selectedHouseholdId, updateSelectedProfile],
+    [
+      dataRevisions,
+      notifyHouseholdDataChanged,
+      profiles,
+      selectHousehold,
+      selectedHouseholdId,
+      updateSelectedProfile,
+    ],
   );
 
   return (

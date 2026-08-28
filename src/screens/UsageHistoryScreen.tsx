@@ -80,11 +80,13 @@ export function UsageHistoryScreen({
     initialAppliance ?? 'total',
   );
   const [data, setData] = useState<UsageHistoryData | null>(null);
+  const [loadedRequestKey, setLoadedRequestKey] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [openAnomaly, setOpenAnomaly] = useState(false);
-  const { selectedHouseholdId } = useHouseholdProfile();
+  const { dataRevision, selectedHouseholdId } = useHouseholdProfile();
+  const requestKey = `${selectedHouseholdId}:${period}:${dataRevision}:${retry}`;
 
   useEffect(() => {
     let active = true;
@@ -93,6 +95,7 @@ export function UsageHistoryScreen({
       .then((result) => {
         if (active) {
           setData(result);
+          setLoadedRequestKey(requestKey);
           setError(null);
           setSelectedIndex(0);
         }
@@ -103,8 +106,9 @@ export function UsageHistoryScreen({
     return () => {
       active = false;
     };
-  }, [period, retry, selectedHouseholdId, service]);
-  const currentData = data?.period === period ? data : null;
+  }, [dataRevision, period, requestKey, retry, selectedHouseholdId, service]);
+  const currentData =
+    data?.period === period && loadedRequestKey === requestKey ? data : null;
   const selectedAnomaly = useMemo(
     () => currentData?.points[selectedIndex]?.anomaly,
     [currentData, selectedIndex],

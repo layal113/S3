@@ -3,10 +3,16 @@ import os
 import time
 import uuid
 import calendar
+import json
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import FastAPI, HTTPException, Query, Body, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
+from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -24,10 +30,16 @@ from api.schemas import (
     UsageHistoryResponse,
     HistoryPoint,
     HistoryPointAppliance,
+    SmartTipsRequest,
+    SmartTipsResponse,
+    TipChatRequest,
+    TipChatResponse,
 )
 from simulator.generate_household import generate_synthetic_household
 from model.predict import predict_disaggregation
 from data.config import MINIMUM_FEATURE_WINDOW_SIZE, CATEGORY_DISPLAY_NAMES
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 logging.basicConfig(
     level=os.getenv("MIQYAS_LOG_LEVEL", "INFO").upper(),
@@ -37,6 +49,7 @@ logger = logging.getLogger("miqyas.api")
 DEBUG_BREAKPOINTS_ENABLED = os.getenv("MIQYAS_DEBUG_BREAKPOINTS") == "1"
 ESTIMATED_EGP_PER_KWH = float(os.getenv("MIQYAS_EGP_PER_KWH", "2.15"))
 TARIFF_THRESHOLDS_KWH = [50.0, 100.0, 200.0, 350.0, 650.0, 1000.0]
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 latest_breakdowns: Dict[str, BreakdownResponse] = {}
 previous_projected_kwh: Dict[str, float] = {}
 
@@ -626,3 +639,165 @@ def get_usage_history(household_id: str, period: str = Query("7d")):
         date_range_label=date_range_label,
         points=points,
     )
+
+
+def call_gemini(payload: Dict[str, Any]) -> Dict[str, Any]:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("GEMINI_API_KEY is not configured on the backend")
+        raise HTTPException(
+            status_code=503,
+            detail="Smart Tips is not configured on this server.",
+        )
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{quote(GEMINI_MODEL, safe='')}:generateContent"
+    )
+    request = UrlRequest(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        response_text = error.read().decode("utf-8", errors="replace")
+        logger.error("Gemini HTTP error status=%s response=%s", error.code, response_text)
+        if error.code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Smart Tips has reached its AI request limit. Please wait and retry.",
+            )
+        raise HTTPException(status_code=502, detail="AI service request failed.")
+    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        logger.exception("Gemini request failed: %s", error)
+        raise HTTPException(status_code=502, detail="AI service is unavailable.")
+
+
+def gemini_text(response: Dict[str, Any]) -> str:
+    try:
+        return response["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError, TypeError, AttributeError):
+        logger.error("Gemini response did not contain candidate text")
+        raise HTTPException(status_code=502, detail="AI service returned no response.")
+
+
+@app.post("/v1/smart-tips/generate", response_model=SmartTipsResponse)
+def generate_smart_tips(request: SmartTipsRequest):
+    prompt = f"""You are an energy efficiency advisor. Based on the household data below, generate exactly 4 personalized energy-saving tips.
+
+Household data:
+- Home type: {request.home_type}
+- Occupants: {request.occupants}
+- Avg daily usage: {request.avg_kwh} kWh
+- Detected anomalies: {request.anomalies_summary}
+- Top energy-consuming periods: {request.peak_hours}
+
+Rules:
+- Each tip must be specific to this household's data, not generic advice
+- Each tip should be actionable
+- Prioritize the tip most likely to save the most energy first
+
+Return ONLY valid JSON, no markdown, no preamble, in this exact schema:
+{{
+  "tips": [
+    {{
+      "id": "tip_1",
+      "title": "short title (max 6 words)",
+      "summary": "1-2 sentence explanation",
+      "estimated_savings": "e.g. ~8% on cooling costs",
+      "category": "heating|cooling|appliances|lighting|behavior"
+    }}
+  ]
+}}"""
+    response = call_gemini(
+        {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.4,
+                "responseMimeType": "application/json",
+                "responseSchema": {
+                    "type": "object",
+                    "required": ["tips"],
+                    "properties": {
+                        "tips": {
+                            "type": "array",
+                            "minItems": 4,
+                            "maxItems": 4,
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "id",
+                                    "title",
+                                    "summary",
+                                    "estimated_savings",
+                                    "category",
+                                ],
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "summary": {"type": "string"},
+                                    "estimated_savings": {"type": "string"},
+                                    "category": {
+                                        "type": "string",
+                                        "enum": [
+                                            "heating",
+                                            "cooling",
+                                            "appliances",
+                                            "lighting",
+                                            "behavior",
+                                        ],
+                                    },
+                                },
+                            },
+                        }
+                    },
+                },
+            },
+        }
+    )
+    raw_text = gemini_text(response)
+    cleaned = raw_text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        parsed = SmartTipsResponse.model_validate_json(cleaned)
+    except Exception as error:
+        logger.exception("Gemini tips JSON validation failed: %s", error)
+        raise HTTPException(status_code=502, detail="AI tips had an invalid format.")
+    if len(parsed.tips) != 4 or len({tip.id for tip in parsed.tips}) != 4:
+        raise HTTPException(status_code=502, detail="AI did not return four unique tips.")
+    if any(not tip.title.strip() or len(tip.title.split()) > 6 for tip in parsed.tips):
+        raise HTTPException(status_code=502, detail="AI tip titles had an invalid format.")
+    return parsed
+
+
+@app.post("/v1/smart-tips/chat", response_model=TipChatResponse)
+def chat_about_tip(request: TipChatRequest):
+    household = request.household_data
+    tip = request.tip
+    system_context = f"""You are an energy efficiency advisor discussing ONE specific tip with a homeowner.
+
+Household context:
+- Home type: {household.home_type}
+- Avg daily usage: {household.avg_kwh} kWh
+
+The tip being discussed:
+Title: {tip.title}
+Summary: {tip.summary}
+
+Answer the user's follow-up questions about this tip specifically — implementation steps, cost estimates, why it applies to their home, alternatives if this doesn't work for them. Stay focused on this tip unless the user clearly asks about something else. Keep responses conversational and concise (2-4 sentences unless they ask for detail)."""
+    contents = [
+        {"role": message.role, "parts": [{"text": message.text}]}
+        for message in request.conversation_history
+    ]
+    contents.append({"role": "user", "parts": [{"text": request.user_message}]})
+    response = call_gemini(
+        {
+            "systemInstruction": {"parts": [{"text": system_context}]},
+            "contents": contents,
+            "generationConfig": {"temperature": 0.7},
+        }
+    )
+    return TipChatResponse(message=gemini_text(response))

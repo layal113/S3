@@ -4,9 +4,10 @@ import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { Platform, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PlaceholderScreen } from '../screens/PlaceholderScreen';
+import { useMobileBrowserBottomInset } from '../hooks/useMobileBrowserBottomInset';
 import { DashboardScreen } from '../screens/DashboardScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { SmartTipsScreen } from '../screens/SmartTipsScreen';
 import { UsageHistoryScreen } from '../screens/UsageHistoryScreen';
 import type { DashboardService, HistoryService } from '../services';
 import { useHouseholdProfile } from '../state/HouseholdProfileContext';
@@ -63,6 +64,7 @@ export function RootNavigator({
   historyService: HistoryService;
 }) {
   const insets = useSafeAreaInsets();
+  const browserBottomInset = useMobileBrowserBottomInset();
   const { width } = useWindowDimensions();
   const isMobileWeb = Platform.OS === 'web' && width <= 768;
   const { selectedHouseholdId } = useHouseholdProfile();
@@ -80,7 +82,7 @@ export function RootNavigator({
             ...shadows.card,
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
-            marginBottom: isMobileWeb ? 56 : 0,
+            marginBottom: isMobileWeb ? Math.max(16, browserBottomInset) : 0,
             minHeight: 60,
             paddingBottom: 6,
             paddingTop: 8,
@@ -121,7 +123,12 @@ export function RootNavigator({
           )}
         </Tab.Screen>
         <Tab.Screen name="Smart Tips">
-          {() => <PlaceholderScreen title="Recommendations" />}
+          {() => (
+            <SmartTipsScreen
+              key={selectedHouseholdId}
+              service={dashboardService}
+            />
+          )}
         </Tab.Screen>
         <Tab.Screen name="Profile">
           {() => <ProfileScreen key={selectedHouseholdId} />}
