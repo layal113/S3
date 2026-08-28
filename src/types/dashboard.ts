@@ -3,7 +3,8 @@ export type ApplianceCategory =
   | 'Water heater'
   | 'Refrigerator'
   | 'Lighting'
-  | 'Other/unclassified';
+  | 'Other/unclassified'
+  | 'Unattributed / baseline';
 
 export type HouseholdId = 'high-ac-home' | 'efficient-flat' | 'family-villa';
 

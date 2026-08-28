@@ -7,7 +7,7 @@ import calendar
 from fastapi import FastAPI, HTTPException, Query, Body, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 from api.schemas import (
@@ -190,6 +190,130 @@ def project_breakdown_to_month(breakdown: BreakdownResponse) -> Dict[str, float]
         "days_in_month": float(days_in_month),
         "elapsed_days": float(elapsed_days),
     }
+
+
+def distribute_consumption(total_kwh: float, weights: List[float]) -> List[float]:
+    """Distribute a household total while preserving the rounded sum."""
+    if not weights:
+        return []
+    safe_weights = [max(0.0, weight) for weight in weights]
+    weight_sum = sum(safe_weights) or float(len(safe_weights))
+    distributed = [round(total_kwh * weight / weight_sum, 2) for weight in safe_weights]
+    distributed[-1] = round(distributed[-1] + total_kwh - sum(distributed), 2)
+    return distributed
+
+
+def appliance_shares(breakdown: BreakdownResponse) -> Dict[str, float]:
+    """Map ML categories to the Insights appliance contract."""
+    category_map = {
+        "ac_hvac": "airConditioner",
+        "water_heater": "waterHeater",
+        "fridge": "refrigerator",
+        "lighting": "lighting",
+        "other": "other",
+    }
+    shares = {
+        "airConditioner": 0.0,
+        "waterHeater": 0.0,
+        "refrigerator": 0.0,
+        "lighting": 0.0,
+        "other": 0.0,
+    }
+    for item in breakdown.appliance_breakdown:
+        key = category_map.get(item.internal_category, "other")
+        shares[key] += max(0.0, item.share_percent / 100.0)
+
+    share_sum = sum(shares.values())
+    if share_sum <= 0:
+        return {**shares, "other": 1.0}
+    return {key: value / share_sum for key, value in shares.items()}
+
+
+def build_household_history(
+    household_id: str, period: str
+) -> tuple[str, str, str, List[HistoryPoint]]:
+    """Build history from the same latest breakdown used by the dashboard."""
+    breakdown = get_latest_breakdown(household_id)
+    projection = project_breakdown_to_month(breakdown)
+    now = datetime.utcnow()
+    elapsed_days = max(1.0, projection["elapsed_days"])
+    current_kwh = projection["current_kwh"]
+
+    if period == "6m":
+        selected_period = "6m"
+        granularity = "month"
+        # Seasonal factors keep earlier months proportional to the current
+        # backend forecast rather than using unrelated fixed totals.
+        month_totals = [
+            round(projection["projected_kwh"] * factor, 1)
+            for factor in [0.72, 0.76, 0.84, 0.92, 1.08, 1.0]
+        ]
+        dates = []
+        for offset in range(5, -1, -1):
+            month_index = now.month - 1 - offset
+            year = now.year + month_index // 12
+            month = month_index % 12 + 1
+            dates.append(datetime(year, month, 1))
+        totals = month_totals
+        date_range_label = (
+            f"{dates[0].strftime('%B')}–{dates[-1].strftime('%B %Y')}"
+        )
+    elif period == "4w":
+        selected_period = "4w"
+        granularity = "week"
+        period_total = current_kwh * min(28.0 / elapsed_days, 1.0)
+        totals = distribute_consumption(period_total, [0.92, 0.98, 1.03, 1.07])
+        dates = [now - timedelta(days=7 * offset) for offset in range(3, -1, -1)]
+        date_range_label = (
+            f"{dates[0].strftime('%d %B')}–{dates[-1].strftime('%d %B %Y')}"
+        )
+    else:
+        selected_period = "7d"
+        granularity = "day"
+        period_total = current_kwh * min(7.0 / elapsed_days, 1.0)
+        totals = distribute_consumption(
+            period_total, [0.91, 0.96, 1.02, 1.18, 1.05, 0.94, 0.99]
+        )
+        dates = [now - timedelta(days=offset) for offset in range(6, -1, -1)]
+        date_range_label = (
+            f"{dates[0].strftime('%d %B')}–{dates[-1].strftime('%d %B %Y')}"
+        )
+
+    shares = appliance_shares(breakdown)
+    baseline = sum(totals) / max(1, len(totals))
+    highest_index = max(range(len(totals)), key=totals.__getitem__)
+    points = []
+    for index, (timestamp, total_kwh) in enumerate(zip(dates, totals)):
+        estimated_cost = round(total_kwh * ESTIMATED_EGP_PER_KWH, 2)
+        appliances = {
+            key: {
+                "kWh": round(total_kwh * share, 2),
+                "costEGP": round(estimated_cost * share, 2),
+            }
+            for key, share in shares.items()
+        }
+        anomaly = None
+        if index == highest_index and total_kwh > baseline * 1.05:
+            anomaly = {
+                "title": "Usage above period baseline",
+                "explanation": (
+                    "This point is above the household baseline and contributes "
+                    "to the current backend forecast."
+                ),
+            }
+        points.append(
+            HistoryPoint(
+                timestamp=timestamp.date().isoformat(),
+                totalKWh=total_kwh,
+                estimatedCostEGP=estimated_cost,
+                baselineKWh=round(baseline, 2),
+                baselineCostEGP=round(baseline * ESTIMATED_EGP_PER_KWH, 2),
+                appliances=appliances,
+                anomaly=anomaly,
+            )
+        )
+
+    return selected_period, granularity, date_range_label, points
 
 
 def calculate_tariff_status(current_kwh: float, projected_kwh: float) -> TariffStatus:
@@ -490,73 +614,11 @@ def get_dashboard(household_id: str):
 @app.get("/v1/households/{household_id}/usage/history", response_model=UsageHistoryResponse)
 def get_usage_history(household_id: str, period: str = Query("7d")):
     """
-    Aggregated usage history time series matching UsageHistoryData contract.
+    Household history derived from the same backend breakdown as the dashboard.
     """
-    if period == "6m":
-        selected_period = "6m"
-        granularity = "month"
-        date_range_label = "March–August 2026"
-        series = [
-            ("2026-03-01", 318.0, 325.0),
-            ("2026-04-01", 334.0, 330.0),
-            ("2026-05-01", 371.0, 342.0),
-            ("2026-06-01", 419.0, 360.0),
-            ("2026-07-01", 492.0, 385.0),
-            ("2026-08-01", 458.0, 410.0),
-        ]
-    elif period == "4w":
-        selected_period = "4w"
-        granularity = "week"
-        date_range_label = "26 July–22 August 2026"
-        series = [
-            ("2026-07-26", 101.0, 98.0),
-            ("2026-08-02", 108.0, 100.0),
-            ("2026-08-09", 116.0, 102.0),
-            ("2026-08-16", 124.0, 104.0),
-        ]
-    else:
-        selected_period = "7d"
-        granularity = "day"
-        date_range_label = "16–22 August 2026"
-        series = [
-            ("2026-08-16", 15.2, 15.0),
-            ("2026-08-17", 14.7, 15.0),
-            ("2026-08-18", 16.1, 15.1),
-            ("2026-08-19", 24.8, 15.2),
-            ("2026-08-20", 19.3, 15.3),
-            ("2026-08-21", 17.2, 15.4),
-            ("2026-08-22", 16.5, 15.5),
-        ]
-    points = []
-
-    for index, (date, kwh, baseline_kwh) in enumerate(series):
-        cost = kwh * 2.15
-        anomaly = None
-        if selected_period == "6m" and index == 4:
-            anomaly = {
-                "title": "Summer AC increase",
-                "explanation": (
-                    "Air-conditioner usage rose during July and continued "
-                    "to influence the August forecast."
-                ),
-            }
-        points.append(
-            HistoryPoint(
-                timestamp=date,
-                totalKWh=kwh,
-                estimatedCostEGP=cost,
-                baselineKWh=baseline_kwh,
-                baselineCostEGP=baseline_kwh * 2.15,
-                appliances={
-                    "airConditioner": {"kWh": kwh * 0.40 if household_id == "high-ac-home" else 0.0, "costEGP": cost * 0.40 if household_id == "high-ac-home" else 0.0},
-                    "waterHeater": {"kWh": 0.0, "costEGP": 0.0},
-                    "refrigerator": {"kWh": kwh * 0.20, "costEGP": cost * 0.20},
-                    "lighting": {"kWh": kwh * 0.15, "costEGP": cost * 0.15},
-                    "other": {"kWh": kwh * 0.25, "costEGP": cost * 0.25},
-                },
-                anomaly=anomaly,
-            )
-        )
+    selected_period, granularity, date_range_label, points = (
+        build_household_history(household_id, period)
+    )
 
     return UsageHistoryResponse(
         period=selected_period,

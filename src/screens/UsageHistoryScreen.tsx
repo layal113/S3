@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MiqyasBrand } from '../components/MiqyasBrand';
 import { UsageHistoryChart } from '../components/UsageHistoryChart';
 import type { HistoryService } from '../services';
+import { useHouseholdProfile } from '../state/HouseholdProfileContext';
 import { colors, radii, shadows, spacing, typography } from '../theme';
 import type {
   HistoryAppliance,
@@ -83,11 +84,12 @@ export function UsageHistoryScreen({
   const [retry, setRetry] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [openAnomaly, setOpenAnomaly] = useState(false);
+  const { selectedHouseholdId } = useHouseholdProfile();
 
   useEffect(() => {
     let active = true;
     service
-      .getHistory(period)
+      .getHistory(selectedHouseholdId, period)
       .then((result) => {
         if (active) {
           setData(result);
@@ -101,7 +103,7 @@ export function UsageHistoryScreen({
     return () => {
       active = false;
     };
-  }, [period, retry, service]);
+  }, [period, retry, selectedHouseholdId, service]);
   const currentData = data?.period === period ? data : null;
   const selectedAnomaly = useMemo(
     () => currentData?.points[selectedIndex]?.anomaly,
