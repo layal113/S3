@@ -38,6 +38,7 @@ from api.schemas import (
 from simulator.generate_household import generate_synthetic_household
 from model.predict import predict_disaggregation
 from data.config import MINIMUM_FEATURE_WINDOW_SIZE, CATEGORY_DISPLAY_NAMES
+import sentry_sdk
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
@@ -46,6 +47,17 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("miqyas.api")
+
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=1.0,
+        send_default_pii=False,
+    )
+    logger.info("Sentry error monitoring initialized.")
+else:
+    logger.info("SENTRY_DSN not configured; Sentry monitoring is disabled.")
 DEBUG_BREAKPOINTS_ENABLED = os.getenv("MIQYAS_DEBUG_BREAKPOINTS") == "1"
 ESTIMATED_EGP_PER_KWH = float(os.getenv("MIQYAS_EGP_PER_KWH", "2.15"))
 TARIFF_THRESHOLDS_KWH = [50.0, 100.0, 200.0, 350.0, 650.0, 1000.0]
@@ -138,6 +150,27 @@ def read_root():
         "version": "1.0.0",
         "docs": "/docs",
     }
+
+
+@app.get("/sentry-debug")
+def trigger_sentry_unhandled_error():
+    """Trigger an unhandled ZeroDivisionError to verify automatic Sentry error capture."""
+    division_by_zero = 1 / 0
+    return {"result": division_by_zero}
+
+
+@app.get("/sentry-capture-test")
+def trigger_sentry_manual_capture():
+    """Manually capture an error via sentry_sdk to verify manual error reporting."""
+    try:
+        raise ValueError("Miqyas manually triggered test error for Sentry verification")
+    except ValueError as err:
+        event_id = sentry_sdk.capture_exception(err)
+        return {
+            "status": "captured",
+            "message": str(err),
+            "sentry_event_id": str(event_id) if event_id else None,
+        }
 
 
 def compute_dynamic_recommendation(breakdown_items: List[ApplianceBreakdownItem], duration_minutes: int) -> RecommendationResponse:
