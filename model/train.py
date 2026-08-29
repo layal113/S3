@@ -54,7 +54,7 @@ def train_models():
     present_categories = set(df["appliance_category"].unique())
     # Exclude categories with no positive on-state samples (like water_heater / water in UK-DALE)
     valid_trainable_categories = []
-    for cat in [INTERNAL_CATEGORY_FRIDGE, INTERNAL_CATEGORY_LIGHTING, INTERNAL_CATEGORY_OTHER]:
+    for cat in [INTERNAL_CATEGORY_FRIDGE, INTERNAL_CATEGORY_LIGHTING, INTERNAL_CATEGORY_OTHER, INTERNAL_CATEGORY_AC_HVAC]:
         if cat in present_categories:
             valid_trainable_categories.append(cat)
 

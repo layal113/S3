@@ -19,10 +19,17 @@ from data.config import (
 )
 from model.features import extract_features, FEATURE_COLUMNS
 
+# Deployed classification decision thresholds derived from GroupKFold threshold sweeps (V3 & V4)
+DECISION_THRESHOLDS = {
+    INTERNAL_CATEGORY_FRIDGE: 0.40,
+    INTERNAL_CATEGORY_LIGHTING: 0.15,  # Deployed from V3 threshold sweep (improves recall from 26.7% to 91.6%)
+    INTERNAL_CATEGORY_AC_HVAC: 0.40,   # Deployed from V4 threshold sweep (optimal F1 balance)
+    INTERNAL_CATEGORY_OTHER: 0.35,
+}
 
-def get_confidence_label(score: float, not_yet_trained: bool) -> str:
+def get_model_score_label(score: float, not_yet_trained: bool) -> str:
     """
-    Translates numeric confidence score (0.0 - 1.0) into explicit confidence label:
+    Translates numeric model score (0.0 - 1.0) into explicit label:
     - High: >= 0.70
     - Medium: 0.40 - 0.70
     - Low: < 0.40
@@ -53,11 +60,11 @@ class ApplianceDisaggregator:
                 self.metadata = json.load(f)
             self.trained_categories = self.metadata.get("trained_categories", [])
         else:
-            # Fallback default if metadata does not exist
             self.trained_categories = [
                 INTERNAL_CATEGORY_FRIDGE,
                 INTERNAL_CATEGORY_LIGHTING,
                 INTERNAL_CATEGORY_OTHER,
+                INTERNAL_CATEGORY_AC_HVAC,
             ]
 
         for cat in self.trained_categories:
@@ -69,7 +76,8 @@ class ApplianceDisaggregator:
 
     def predict(self, input_df: pd.DataFrame, power_column: str = "mains_power", timestamp_column: str = "timestamp") -> Dict[str, Any]:
         """
-        Takes raw aggregate power time series and returns per-appliance predictions.
+        Takes raw aggregate power time series and integrates appliance power over the entire reading window to compute kWh.
+        Enforces deployed decision thresholds and unattributed baseline accounting (V1 & V3).
 
         Requires minimum input window of MINIMUM_FEATURE_WINDOW_SIZE (15) contiguous readings.
         """
@@ -79,43 +87,54 @@ class ApplianceDisaggregator:
                 f"window size ({MINIMUM_FEATURE_WINDOW_SIZE} 1-minute readings) needed for 15-minute rolling statistics."
             )
 
-        # 1. Run through identical shared feature engineering pipeline
         features_df = extract_features(input_df, power_column=power_column, timestamp_column=timestamp_column)
+        n_readings = len(input_df)
 
-        # Use the latest (most recent) window timestamp/reading for prediction snapshot
-        latest_features = features_df.iloc[[-1]]
-        latest_row = input_df.iloc[-1]
-        latest_mains_power = float(latest_row[power_column])
+        mains_power_series = input_df[power_column].astype(float).values
+        total_mains_kwh = float(np.sum(mains_power_series * (1.0 / 60.0) / 1000.0))
 
-        results = []
-        raw_powers = {}
-        total_estimated_power_w = 0.0
+        cat_powers_per_step = {cat: np.zeros(n_readings) for cat in SUPPORTED_CATEGORIES}
+        cat_scores = {}
 
         for cat in SUPPORTED_CATEGORIES:
-            display_name = CATEGORY_DISPLAY_NAMES.get(cat, cat.capitalize())
-
             if cat in self.models:
                 model = self.models[cat]
-                # Probability of appliance ON (class 1)
-                proba = model.predict_proba(latest_features)[0]
-                on_prob = float(proba[1]) if len(proba) > 1 else float(proba[0])
+                probas = model.predict_proba(features_df)
+                if len(model.classes_) > 1 and 1 in model.classes_:
+                    idx_on = int(np.where(model.classes_ == 1)[0][0])
+                    on_probs = probas[:, idx_on]
+                else:
+                    on_probs = probas[:, 0]
 
-                # Heuristic power estimation based on aggregate power & state probability
+                thresh = DECISION_THRESHOLDS.get(cat, 0.50)
+                # Binary state active if probability meets deployed decision threshold
+                active_mask = (on_probs >= thresh).astype(float)
+
+                latest_prob = float(on_probs[-1])
+                score = round(max(latest_prob, 1.0 - latest_prob), 4)
+                cat_scores[cat] = score
+
                 if cat == INTERNAL_CATEGORY_FRIDGE:
-                    est_power = 100.0 * on_prob if on_prob > 0.4 else 0.0
+                    cat_powers_per_step[cat] = 100.0 * active_mask
                 elif cat == INTERNAL_CATEGORY_LIGHTING:
-                    est_power = 120.0 * on_prob if on_prob > 0.4 else 0.0
-                else:  # other
-                    est_power = max(0.0, latest_mains_power - 220.0) * on_prob if on_prob > 0.4 else 0.0
-
-                raw_powers[cat] = est_power
-                total_estimated_power_w += est_power
+                    cat_powers_per_step[cat] = 15.0 * active_mask
+                elif cat == INTERNAL_CATEGORY_AC_HVAC:
+                    cat_powers_per_step[cat] = 1600.0 * active_mask
+                elif cat == INTERNAL_CATEGORY_OTHER:
+                    other_p = mains_power_series - (cat_powers_per_step[INTERNAL_CATEGORY_FRIDGE] + cat_powers_per_step[INTERNAL_CATEGORY_LIGHTING] + cat_powers_per_step[INTERNAL_CATEGORY_AC_HVAC])
+                    cat_powers_per_step[cat] = np.maximum(0.0, other_p) * active_mask
             else:
-                raw_powers[cat] = 0.0
+                cat_scores[cat] = 0.0
 
-        # Calculate consumption kWh (over window duration) and share percentages
-        duration_hours = len(input_df) / 60.0
-        total_kwh = (latest_mains_power * duration_hours) / 1000.0
+        cat_kwh_dict = {}
+        total_appliance_kwh = 0.0
+        for cat in SUPPORTED_CATEGORIES:
+            if cat in self.models:
+                kwh = float(np.sum(cat_powers_per_step[cat] * (1.0 / 60.0) / 1000.0))
+                cat_kwh_dict[cat] = kwh
+                total_appliance_kwh += kwh
+            else:
+                cat_kwh_dict[cat] = 0.0
 
         appliance_breakdown = []
         for cat in SUPPORTED_CATEGORIES:
@@ -124,35 +143,47 @@ class ApplianceDisaggregator:
             not_yet_trained = not is_trained
 
             if is_trained:
-                model = self.models[cat]
-                proba = model.predict_proba(latest_features)[0]
-                prob_on = float(proba[1]) if len(proba) > 1 else float(proba[0])
-                confidence_score = round(max(prob_on, 1.0 - prob_on), 4)
-                conf_label = get_confidence_label(confidence_score, not_yet_trained=False)
-
-                cat_power = raw_powers[cat]
-                cat_kwh = round((cat_power * duration_hours) / 1000.0, 4)
-                share = round((cat_power / total_estimated_power_w * 100.0), 2) if total_estimated_power_w > 0 else 0.0
+                score = cat_scores[cat]
+                score_label = get_model_score_label(score, not_yet_trained=False)
+                cat_kwh = round(cat_kwh_dict[cat], 4)
+                share = round((cat_kwh / total_mains_kwh * 100.0), 2) if total_mains_kwh > 0 else 0.0
             else:
-                confidence_score = 0.0
-                conf_label = "N/A"
+                score = 0.0
+                score_label = "N/A"
                 cat_kwh = 0.0
                 share = 0.0
 
             appliance_breakdown.append({
-                "category": cat,
+                "category": display_name,
+                "internal_category": cat,
                 "display_name": display_name,
                 "consumption_kwh": cat_kwh,
                 "share_percent": share,
-                "confidence_score": confidence_score,
-                "confidence_label": conf_label,
+                "model_score": score,
+                "model_score_label": score_label,
                 "not_yet_trained": not_yet_trained,
             })
 
+        # V1 FIX: Explicit unattributed / baseline consumption accounting so shares sum to 100% of total mains consumption
+        unattributed_kwh = max(0.0, total_mains_kwh - total_appliance_kwh)
+        unattributed_share = round((unattributed_kwh / total_mains_kwh * 100.0), 2) if total_mains_kwh > 0 else 0.0
+
+        appliance_breakdown.append({
+            "category": "Unattributed / baseline",
+            "internal_category": "unattributed",
+            "display_name": "Unattributed / baseline",
+            "consumption_kwh": round(unattributed_kwh, 4),
+            "share_percent": unattributed_share,
+            "model_score": 1.0,
+            "model_score_label": "High",
+            "not_yet_trained": False,
+        })
+
+        latest_row = input_df.iloc[-1]
         return {
             "timestamp": str(latest_row[timestamp_column]),
-            "duration_minutes": len(input_df),
-            "total_consumption_kwh": round(total_kwh, 4),
+            "duration_minutes": n_readings,
+            "total_consumption_kwh": round(total_mains_kwh, 4),
             "appliance_breakdown": appliance_breakdown,
             "simulated": False,
         }
@@ -166,12 +197,11 @@ def predict_disaggregation(input_df: pd.DataFrame) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    # Quick sanity test of predict pipeline
     dates = pd.date_range("2023-01-01 12:00:00", periods=20, freq="min", tz="UTC")
     dummy_input = pd.DataFrame({
         "timestamp": dates,
-        "mains_power": [300.0 + i * 5 for i in range(20)]
+        "mains_power": [200.0] * 20
     })
     res = predict_disaggregation(dummy_input)
-    print("Prediction Result:")
+    print("Updated Prediction Result with Unattributed Accounting:")
     print(json.dumps(res, indent=2))

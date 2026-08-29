@@ -3,7 +3,8 @@ export type ApplianceCategory =
   | 'Water heater'
   | 'Refrigerator'
   | 'Lighting'
-  | 'Other/unclassified';
+  | 'Other/unclassified'
+  | 'Unattributed / baseline';
 
 export type HouseholdId = 'high-ac-home' | 'efficient-flat' | 'family-villa';
 
@@ -16,7 +17,10 @@ export interface ApplianceUsage {
   category: ApplianceCategory;
   consumptionKwh: number;
   sharePercent: number;
-  confidence: 'High' | 'Medium';
+  modelScore?: number;
+  modelScoreLabel?: 'High' | 'Medium' | 'Low' | 'N/A';
+  confidence?: string;
+  notYetTrained?: boolean;
 }
 
 export interface PriorityInsight {

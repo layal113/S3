@@ -5,15 +5,12 @@ import { formatEgp, formatNumber } from '../utils/format';
 import { KpiCard } from './KpiCard';
 
 export function DashboardSummary({ data }: { data: DashboardData }) {
-  const comparisonDirection =
-    data.changeFromPreviousMonthPercent > 0 ? 'higher' : 'lower';
-
   return (
     <View style={styles.grid}>
       <KpiCard
         icon="wallet-outline"
         label="Predicted month bill"
-        qualifier={`${formatNumber(Math.abs(data.changeFromPreviousMonthPercent))}% ${comparisonDirection} than last month · ${formatNumber(data.projectedMonthlyKwh)} kWh projected`}
+        qualifier={`${formatNumber(data.changeFromPreviousMonthPercent)}% vs previous forecast · ${formatNumber(data.projectedMonthlyKwh)} kWh projected`}
         value={formatEgp(data.predictedMonthEndBillEgp)}
       />
       <KpiCard

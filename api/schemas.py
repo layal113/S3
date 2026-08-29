@@ -11,14 +11,16 @@ class BaseSchema(BaseModel):
     )
 
 
+# Note: model_score and model_score_label represent raw predicted classifier probabilities, not calibrated accuracy.
 class ApplianceBreakdownItem(BaseSchema):
-    category: str = Field(..., description="Internal taxonomy category key, e.g. 'fridge', 'ac_hvac'")
+    category: str = Field(..., description="Category display name or internal key")
+    internal_category: str = Field(..., description="Internal taxonomy key, e.g. 'fridge', 'ac_hvac'")
     display_name: str = Field(..., description="Presentation display name, e.g. 'Refrigerator'")
-    consumption_kwh: float = Field(..., description="Consumption in kWh over period")
+    consumption_kwh: float = Field(..., description="Consumption in kWh over window")
     share_percent: float = Field(..., description="Percentage share of total consumption (0-100%)")
-    confidence_score: float = Field(..., description="Numeric confidence score (0.0 to 1.0)")
-    confidence_label: Literal["High", "Medium", "Low", "N/A"] = Field(
-        ..., description="Confidence tier: High >=0.70, Medium 0.40-0.70, Low <0.40, N/A for untrained"
+    model_score: float = Field(..., description="Raw classifier predicted probability score (0.0 to 1.0)")
+    model_score_label: Literal["High", "Medium", "Low", "N/A"] = Field(
+        ..., description="Raw probability tier: High >=0.70, Medium 0.40-0.70, Low <0.40, N/A for untrained"
     )
     not_yet_trained: bool = Field(
         ..., description="Explicit flag indicating if category is absent/untrained in dataset"
@@ -41,7 +43,7 @@ class BreakdownResponse(BaseSchema):
 
 
 class SimulateUsageRequest(BaseSchema):
-    household_id: Optional[str] = Field(default="synthetic-1")
+    household_id: Optional[str] = Field(default="high-ac-home")
     duration_minutes: Optional[int] = Field(default=60, ge=15, description="Duration in minutes (minimum 15)")
     interval_seconds: Optional[int] = Field(default=60)
 
@@ -100,23 +102,68 @@ class DashboardResponse(BaseSchema):
     updated_at: str
 
 
-class HistoryPointAppliance(BaseSchema):
-    kwh: float
-    cost_egp: float
+class HistoryPointAppliance(BaseModel):
+    kWh: float = Field(..., serialization_alias="kWh")
+    costEGP: float = Field(..., serialization_alias="costEGP")
 
 
-class HistoryPoint(BaseSchema):
+class HistoryPointAppliances(BaseModel):
+    airConditioner: HistoryPointAppliance = Field(..., serialization_alias="airConditioner")
+    waterHeater: HistoryPointAppliance = Field(..., serialization_alias="waterHeater")
+    refrigerator: HistoryPointAppliance = Field(..., serialization_alias="refrigerator")
+    lighting: HistoryPointAppliance = Field(..., serialization_alias="lighting")
+    other: HistoryPointAppliance = Field(..., serialization_alias="other")
+
+
+class HistoryPoint(BaseModel):
     timestamp: str
-    total_kwh: float
-    estimated_cost_egp: float
-    baseline_kwh: float
-    baseline_cost_egp: float
-    appliances: Dict[str, HistoryPointAppliance]
+    totalKWh: float = Field(..., serialization_alias="totalKWh")
+    estimatedCostEGP: float = Field(..., serialization_alias="estimatedCostEGP")
+    baselineKWh: float = Field(..., serialization_alias="baselineKWh")
+    baselineCostEGP: float = Field(..., serialization_alias="baselineCostEGP")
+    appliances: HistoryPointAppliances
     anomaly: Optional[Dict[str, str]] = None
 
 
 class UsageHistoryResponse(BaseSchema):
-    period: Literal["7d", "4w"]
-    granularity: Literal["day", "week"]
+    period: Literal["7d", "4w", "6m"]
+    granularity: Literal["day", "week", "month"]
     date_range_label: str
     points: List[HistoryPoint]
+
+
+class SmartTip(BaseSchema):
+    id: str
+    title: str
+    summary: str
+    estimated_savings: str
+    category: Literal["heating", "cooling", "appliances", "lighting", "behavior"]
+
+
+class SmartTipsResponse(BaseSchema):
+    tips: List[SmartTip]
+
+
+class SmartTipsRequest(BaseSchema):
+    household_id: str
+    home_type: str
+    occupants: int
+    avg_kwh: float
+    anomalies_summary: str
+    peak_hours: str
+
+
+class TipChatMessage(BaseSchema):
+    role: Literal["user", "model"]
+    text: str
+
+
+class TipChatRequest(BaseSchema):
+    tip: SmartTip
+    household_data: SmartTipsRequest
+    conversation_history: List[TipChatMessage]
+    user_message: str
+
+
+class TipChatResponse(BaseSchema):
+    message: str

@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MiqyasBrand } from '../components/MiqyasBrand';
 import { UsageHistoryChart } from '../components/UsageHistoryChart';
 import type { HistoryService } from '../services';
+import { useHouseholdProfile } from '../state/HouseholdProfileContext';
 import { colors, radii, shadows, spacing, typography } from '../theme';
 import type {
   HistoryAppliance,
@@ -79,18 +80,22 @@ export function UsageHistoryScreen({
     initialAppliance ?? 'total',
   );
   const [data, setData] = useState<UsageHistoryData | null>(null);
+  const [loadedRequestKey, setLoadedRequestKey] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [openAnomaly, setOpenAnomaly] = useState(false);
+  const { dataRevision, selectedHouseholdId } = useHouseholdProfile();
+  const requestKey = `${selectedHouseholdId}:${period}:${dataRevision}:${retry}`;
 
   useEffect(() => {
     let active = true;
     service
-      .getHistory(period)
+      .getHistory(selectedHouseholdId, period)
       .then((result) => {
         if (active) {
           setData(result);
+          setLoadedRequestKey(requestKey);
           setError(null);
           setSelectedIndex(0);
         }
@@ -101,8 +106,9 @@ export function UsageHistoryScreen({
     return () => {
       active = false;
     };
-  }, [period, retry, service]);
-  const currentData = data?.period === period ? data : null;
+  }, [dataRevision, period, requestKey, retry, selectedHouseholdId, service]);
+  const currentData =
+    data?.period === period && loadedRequestKey === requestKey ? data : null;
   const selectedAnomaly = useMemo(
     () => currentData?.points[selectedIndex]?.anomaly,
     [currentData, selectedIndex],
@@ -127,6 +133,7 @@ export function UsageHistoryScreen({
           items={[
             { id: '7d', label: '7 days' },
             { id: '4w', label: '4 weeks' },
+            { id: '6m', label: '6 months' },
           ]}
           value={period}
           onChange={setPeriod}
@@ -201,7 +208,12 @@ export function UsageHistoryScreen({
                     {appliances.find((item) => item.id === appliance)?.label}
                   </Text>
                   <Text style={styles.range}>
-                    {currentData.dateRangeLabel} · {currentData.granularity}ly
+                    {currentData.dateRangeLabel} ·{' '}
+                    {currentData.granularity === 'day'
+                      ? 'daily'
+                      : currentData.granularity === 'week'
+                        ? 'weekly'
+                        : 'monthly'}
                   </Text>
                 </View>
                 <Text style={styles.unit}>

@@ -53,6 +53,36 @@ const detailIcons = {
   tariffTier: 'speedometer-outline',
 } as const;
 
+const slotPatterns = [
+  ['9:00 AM', '11:30 AM', '2:00 PM'],
+  ['10:00 AM', '1:00 PM', '4:30 PM'],
+  ['9:30 AM', '12:00 PM', '3:00 PM', '5:00 PM'],
+  ['8:30 AM', '11:00 AM', '2:30 PM'],
+];
+
+function createBookingDays(count = 14) {
+  const start = new Date();
+  start.setHours(12, 0, 0, 0);
+  start.setDate(start.getDate() + 1);
+
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    const year = date.getFullYear();
+    const monthNumber = String(date.getMonth() + 1).padStart(2, '0');
+    const dayNumber = String(date.getDate()).padStart(2, '0');
+    return {
+      id: `${year}-${monthNumber}-${dayNumber}`,
+      weekday: date.toLocaleDateString('en-US', { weekday: 'short' }),
+      day: String(date.getDate()),
+      month: date.toLocaleDateString('en-US', { month: 'short' }),
+      slots: slotPatterns[index % slotPatterns.length],
+    };
+  });
+}
+
+const bookingDays = createBookingDays();
+
 function ProfileDetail({
   icon,
   label,
@@ -112,6 +142,14 @@ export function ProfileScreen() {
     createDraft(profile),
   );
   const [isEditing, setIsEditing] = useState(false);
+  const [isBookingsOpen, setIsBookingsOpen] = useState(false);
+  const [selectedBookingDate, setSelectedBookingDate] = useState<string>(
+    bookingDays[0].id,
+  );
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [confirmedBooking, setConfirmedBooking] = useState<string | null>(null);
+  const selectedDay =
+    bookingDays.find((day) => day.id === selectedBookingDate) ?? bookingDays[0];
 
   const openEditor = () => {
     setDraft(createDraft(profile));
@@ -214,7 +252,180 @@ export function ProfileScreen() {
             value={`Tier ${profile.tariffTier}`}
           />
         </View>
+
+        <View style={styles.bookingsSection}>
+          <Text style={styles.sectionLabel}>MY BOOKINGS</Text>
+          <Pressable
+            accessibilityLabel={`Open CT clamp installation bookings. ${confirmedBooking ?? 'No installation booked'}.`}
+            accessibilityRole="button"
+            onPress={() => setIsBookingsOpen(true)}
+            style={({ pressed }) => [
+              styles.bookingsCard,
+              pressed && styles.pressed,
+            ]}
+          >
+            <View style={styles.bookingIcon}>
+              <Ionicons
+                color={colors.primary}
+                name="calendar-outline"
+                size={24}
+              />
+            </View>
+            <View style={styles.bookingCopy}>
+              <Text style={styles.bookingTitle}>CT Clamp Installation</Text>
+              <Text style={styles.bookingStatus}>
+                {confirmedBooking ?? 'No installation booked'}
+              </Text>
+            </View>
+            <Ionicons
+              color={colors.textMuted}
+              name="chevron-forward"
+              size={22}
+            />
+          </Pressable>
+        </View>
       </ScrollView>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setIsBookingsOpen(false)}
+        transparent
+        visible={isBookingsOpen}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            accessibilityLabel="Close bookings"
+            onPress={() => setIsBookingsOpen(false)}
+            style={styles.backdrop}
+          />
+          <SafeAreaView edges={['bottom']} style={styles.bookingModalCard}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>
+                  Book CT clamp installation
+                </Text>
+                <Text style={styles.modalSubtitle}>
+                  Choose when a technician can install your CT clamp.
+                </Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+                onPress={() => setIsBookingsOpen(false)}
+                style={styles.closeButton}
+              >
+                <Ionicons color={colors.text} name="close" size={22} />
+              </Pressable>
+            </View>
+
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerLabel}>SELECT A DATE</Text>
+              <Text style={styles.swipeHint}>Swipe for more →</Text>
+            </View>
+            <ScrollView
+              contentContainerStyle={styles.dateOptions}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              {bookingDays.map((day) => {
+                const selected = day.id === selectedBookingDate;
+                return (
+                  <Pressable
+                    key={day.id}
+                    accessibilityLabel={`${day.weekday}, ${day.month} ${day.day}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => {
+                      setSelectedBookingDate(day.id);
+                      setSelectedSlot(null);
+                    }}
+                    style={[
+                      styles.dateOption,
+                      selected && styles.selectedDateOption,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dateWeekday,
+                        selected && styles.selectedDateText,
+                      ]}
+                    >
+                      {day.weekday}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.dateDay,
+                        selected && styles.selectedDateText,
+                      ]}
+                    >
+                      {day.day}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.dateMonth,
+                        selected && styles.selectedDateText,
+                      ]}
+                    >
+                      {day.month}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={styles.pickerLabel}>AVAILABLE SLOTS</Text>
+            <View style={styles.slotGrid}>
+              {selectedDay.slots.map((slot) => {
+                const selected = slot === selectedSlot;
+                return (
+                  <Pressable
+                    key={slot}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => setSelectedSlot(slot)}
+                    style={[styles.slot, selected && styles.selectedSlot]}
+                  >
+                    <Ionicons
+                      color={selected ? colors.surface : colors.teal}
+                      name="time-outline"
+                      size={17}
+                    />
+                    <Text
+                      style={[
+                        styles.slotText,
+                        selected && styles.selectedSlotText,
+                      ]}
+                    >
+                      {slot}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !selectedSlot }}
+              disabled={!selectedSlot}
+              onPress={() => {
+                if (!selectedSlot) return;
+                setConfirmedBooking(
+                  `${selectedDay.weekday}, ${selectedDay.month} ${selectedDay.day} at ${selectedSlot}`,
+                );
+                setIsBookingsOpen(false);
+              }}
+              style={({ pressed }) => [
+                styles.confirmBookingButton,
+                !selectedSlot && styles.disabledButton,
+                pressed && selectedSlot && styles.pressed,
+              ]}
+            >
+              <Text style={styles.saveButtonText}>Confirm installation</Text>
+            </Pressable>
+          </SafeAreaView>
+        </View>
+      </Modal>
 
       <Modal
         animationType="slide"
@@ -450,6 +661,97 @@ const styles = StyleSheet.create({
   detailText: { flex: 1 },
   detailLabel: { ...typography.label, color: colors.textMuted },
   detailValue: { ...typography.body, color: colors.text, fontWeight: '600' },
+  bookingsSection: { gap: spacing.sm },
+  sectionLabel: {
+    ...typography.label,
+    color: colors.teal,
+    fontSize: 11,
+    letterSpacing: 0.8,
+  },
+  bookingsCard: {
+    ...shadows.card,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    flexDirection: 'row',
+    gap: spacing.md,
+    minHeight: 88,
+    padding: spacing.lg,
+  },
+  bookingIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.tealSoft,
+    borderRadius: radii.md,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  bookingCopy: { flex: 1 },
+  bookingTitle: { ...typography.heading, color: colors.text, fontSize: 17 },
+  bookingStatus: { ...typography.body, color: colors.textMuted, fontSize: 13 },
+  bookingModalCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    gap: spacing.lg,
+    padding: spacing.xl,
+  },
+  pickerLabel: {
+    ...typography.label,
+    color: colors.textMuted,
+    fontSize: 11,
+    letterSpacing: 0.7,
+  },
+  pickerHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  swipeHint: { ...typography.label, color: colors.teal, fontSize: 11 },
+  dateOptions: { gap: spacing.sm, paddingRight: spacing.lg },
+  dateOption: {
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    minWidth: 68,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  selectedDateOption: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  dateWeekday: { ...typography.label, color: colors.textMuted, fontSize: 11 },
+  dateDay: { ...typography.heading, color: colors.text },
+  dateMonth: { ...typography.label, color: colors.textMuted, fontSize: 11 },
+  selectedDateText: { color: colors.surface },
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  slot: {
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  selectedSlot: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  slotText: { ...typography.label, color: colors.text },
+  selectedSlotText: { color: colors.surface },
+  confirmBookingButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
+    padding: spacing.md,
+  },
+  disabledButton: { opacity: 0.42 },
   modalRoot: { flex: 1, justifyContent: 'flex-end' },
   backdrop: {
     backgroundColor: 'rgba(20, 31, 25, 0.5)',

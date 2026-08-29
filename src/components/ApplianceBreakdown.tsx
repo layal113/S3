@@ -15,7 +15,14 @@ import type { ApplianceUsage } from '../types/dashboard';
 import type { HistoryAppliance } from '../types/history';
 import { formatNumber } from '../utils/format';
 
-const chartColors = ['#2E7D4A', '#6B9F7D', '#A5B88D', '#D2B95B', '#84908A'];
+const chartColors = [
+  '#2E7D4A',
+  '#6B9F7D',
+  '#A5B88D',
+  '#D2B95B',
+  '#84908A',
+  '#60756A',
+];
 export function ApplianceBreakdown({
   appliances,
   onAppliancePress,
@@ -121,7 +128,8 @@ export function ApplianceBreakdown({
                   <View style={styles.applianceCopy}>
                     <Text style={styles.applianceName}>{item.category}</Text>
                     <Text style={styles.confidence}>
-                      {item.confidence} confidence
+                      {item.modelScoreLabel ?? item.confidence ?? 'N/A'} model
+                      score
                     </Text>
                   </View>
                   <View style={styles.values}>

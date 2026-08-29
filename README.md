@@ -1,89 +1,142 @@
-# Miqyas Energy
+# S3 (Miqyas) - AI Home Energy Usage Optimizer
 
-Initial mobile-first frontend foundation for an energy dashboard. It uses Expo SDK 57, React Native, and strict TypeScript, and is intended to run on Android, iOS, and web.
+## Overview
+Miqyas is an intelligent home energy analytics and disaggregation platform engineered specifically for Egyptian residential consumers. In Egypt, residential electricity billing follows a steep progressive tier structure where exceeding monthly consumption thresholds triggers retroactive price re-evaluations across entire billing cycles (the "tariff-cliff" problem). Miqyas continuously disaggregates aggregate smart meter power readings into appliance-level consumption, forecasts end-of-month bracket crossings, and generates actionable, AI-driven mitigation recommendations before costly tier transitions occur.
 
-This phase intentionally contains one screen and simulated data only. It does not connect to a backend, prediction model, disaggregation model, or AI service.
+## Tech Stack
+- Backend: FastAPI (Python 3.11+)
+- Machine Learning: scikit-learn (RandomForestClassifier with 15-minute rolling feature extraction), pandas, numpy, joblib
+- Frontend: React Native, Expo SDK 57, TypeScript
+- AI Advisory Layer: Google Gemini API via server-side orchestration
+- Observability and Error Monitoring: Sentry SDK
+- Training Datasets: Public Non-Intrusive Load Monitoring (NILM) research benchmarks (REDD, UK-DALE, IAWE)
 
-## Requirements
+## Prerequisites
+- Python 3.11 or newer
+- Node.js 18 LTS or newer
+- npm or yarn
+- Google Gemini API key (https://aistudio.google.com)
 
-- Node.js 22.13 or newer (the minimum supported by Expo SDK 57)
-- npm
-- Expo Go on a compatible physical device, or Android Studio/Xcode for a simulator
-- Xcode and macOS are required for the iOS Simulator
+## Environment Variables
+Create a `.env` file in the project root based on `.env.example`:
 
-## Install and run
+```env
+# Frontend environment variables (publicly accessible in client bundle)
+EXPO_PUBLIC_API_BASE_URL=http://localhost:8000
 
-```sh
+# Backend-only environment variables (never exposed to client)
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.1-flash-lite
+SENTRY_DSN=your_sentry_dsn_here
+```
+
+## Installation
+
+### Backend
+```bash
+pip install -r requirements.txt
+```
+
+### Frontend
+```bash
 npm install
-npm start
 ```
 
-After the development server starts, scan the QR code with Expo Go or use a platform shortcut. You can also launch a target directly:
+## Running Locally
 
-```sh
-npm run android
-npm run ios
+### 1. Start the Backend Service
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+Interactive API documentation is accessible at:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+### 2. Start the Frontend Application
+```bash
+# Start for Web
 npm run web
+
+# Start for Android Emulator
+npm run android
+
+# Start for iOS Simulator
+npm run ios
+
+# Start via Expo Tunnel (for physical device via Expo Go)
+npx expo start --tunnel
 ```
 
-`npm run android` and `npm run ios` require a configured emulator/simulator. For Expo Go, keep the computer and phone on the same network, start with `npm start`, and scan the displayed QR code.
+Note: When running on the Android Emulator, `src/config/env.ts` automatically maps host network requests to `http://10.0.2.2:8000`.
 
-## Configuration
+## Running Tests
 
-Copy `.env.example` to `.env` for local configuration:
-
-```sh
-cp .env.example .env
+### Backend Test Suite
+```bash
+pytest tests/ -v
 ```
 
-The future backend base URL is configured with `EXPO_PUBLIC_API_BASE_URL`. Values prefixed with `EXPO_PUBLIC_` are embedded in the client bundle and must never contain secrets.
-
-## Architecture
-
-- `App.tsx` is the application entry component and injects the selected dashboard service.
-- `src/navigation/` defines the bottom-tab navigation shared by mobile and web.
-- `src/screens/` contains the one screen implemented in this phase.
-- `src/components/` contains reusable dashboard presentation components.
-- `src/types/` owns shared dashboard contracts.
-- `src/services/` defines `DashboardService` and selects its current implementation.
-- `src/data/` contains the single internally consistent simulated dataset.
-- `src/hooks/` manages asynchronous loading, success, retry, and error state.
-- `src/theme/` centralizes visual design tokens.
-- `src/config/` reads public environment configuration for future integration.
-- `src/utils/` contains display-formatting helpers.
-
-The Home tab is the only implemented product screen. Insights, Recommendations, and Profile are navigation placeholders for later phases.
-
-The Home screen depends only on the `DashboardService` interface, never on the raw mock dataset. When the backend is ready, implement the same interface with an API client and change the service composition in `src/services/index.ts`. No dashboard presentation rewrite should be necessary.
-
-## Placeholder API contract
-
-The app still makes no network requests. Future REST paths are centralized in `src/config/apiEndpoints.ts` so backend integration can happen without scattering URLs through the UI.
-
-| Method | Path                                           | Purpose                                                                   |
-| ------ | ---------------------------------------------- | ------------------------------------------------------------------------- |
-| `GET`  | `/v1/households`                               | List households available to the user                                     |
-| `GET`  | `/v1/households/:householdId`                  | Household details                                                         |
-| `GET`  | `/v1/households/:householdId/dashboard`        | Complete Home dashboard snapshot                                          |
-| `GET`  | `/v1/households/:householdId/usage/current`    | Current kWh and estimated cost                                            |
-| `GET`  | `/v1/households/:householdId/forecast`         | Predicted usage, bill, and comparison                                     |
-| `GET`  | `/v1/households/:householdId/tariff-status`    | Current tier, threshold, and remaining kWh                                |
-| `GET`  | `/v1/households/:householdId/appliances/usage` | Appliance breakdown                                                       |
-| `GET`  | `/v1/households/:householdId/usage/history`    | Usage history; later accepts period, unit, and appliance query parameters |
-| `GET`  | `/v1/households/:householdId/recommendations`  | Energy-saving recommendations                                             |
-
-All paths are relative to `EXPO_PUBLIC_API_BASE_URL`. The existing local mock services remain the active data source.
-
-## Quality checks
-
-```sh
+### Frontend Quality and Type Verification
+```bash
+# TypeScript type check
 npm run typecheck
+
+# ESLint static analysis
 npm run lint
+
+# Prettier format check
 npm run format:check
 ```
 
-To verify a production-style JavaScript bundle for every supported platform, run:
-
-```sh
-npx expo export --platform all
+## Project Structure
+```text
+/
+├── .github/workflows/   # CI/CD pipelines (GitHub Actions)
+├── api/                 # FastAPI routes, Pydantic schemas, and middleware
+├── data/                # Dataset definitions, taxonomy mapping, and ETL utilities
+├── model/               # ML feature engineering, inference pipeline, and model artifacts
+├── simulator/           # Time-series synthetic household signal generator
+├── src/                 # React Native / Expo application
+│   ├── components/      # Modular UI presentation components
+│   ├── config/          # Environment resolution and API endpoints
+│   ├── navigation/      # React Navigation bottom-tab structure
+│   ├── screens/         # Application screens (Home, Insights, Profile)
+│   ├── services/        # API client and telemetry integration
+│   ├── theme/           # Design tokens, typography, and color palettes
+│   └── types/           # Shared TypeScript interfaces and schemas
+├── tests/               # Pytest suite for API endpoints, ML inference, and simulator
+├── Dockerfile           # Production container definition for Render deployment
+└── requirements.txt     # Python backend dependencies
 ```
+
+## System Architecture
+
+```text
++-----------------------+         +-------------------------------+
+|  React Native Client  | <-----> |   FastAPI Backend Service     |
+|   (Expo / TypeScript) |   HTTP  |      (Port 8000 / Uvicorn)    |
++-----------------------+         +---------------+---------------+
+                                                  |
+                         +------------------------+------------------------+
+                         |                        |                        |
+                         v                        v                        v
+             +-----------------------+  +-------------------+  +-----------------------+
+             |   NILM Disaggregator  |  |  Gemini AI Layer  |  |  Sentry Observability |
+             | (Rolling Features/RF) |  | (Server-side API) |  | (Trace & Error Logs)  |
+             +-----------------------+  +-------------------+  +-----------------------+
+```
+
+1. Signal Ingestion: Aggregated mains power readings (1-minute intervals) are processed in rolling 15-minute windows.
+2. Disaggregation Inference: Feature engineering extracts statistical distributions, spectral indicators, and cycle deltas to classify appliance loads (refrigerator, lighting, air conditioner, and unattributed baseline).
+3. Tariff Analytics: Predicts total monthly consumption against the Egyptian residential electricity tariff schedule to identify threshold risk.
+4. AI Advisory: Gemini creates contextualized recommendations based on identified peak load drivers.
+5. Observability: Sentry captures unhandled errors, distributed traces, and manual diagnostics.
+
+## Known Limitations
+- The `water_heater` appliance category is not yet trained due to absence of verified ground truth signatures in the baseline dataset combination. It is explicitly returned with `not_yet_trained: true` and `modelScore: 0.0` rather than emitting synthetic or fabricated values.
+- ML classification baselines are calibrated on benchmark NILM datasets (REDD, UK-DALE, IAWE). Field calibration with empirical Egyptian smart meter data is scheduled for Phase 1 pilot validation.
+- Signal feature extraction requires a minimum rolling window of 15 readings (15 minutes). Requests containing fewer than 15 readings are rejected with HTTP 400 to prevent degraded inference quality.
+
+## Deployment
+- Backend: Deployed on Render using the provided `Dockerfile`.
+- Frontend: Web application bundle built and deployed via Vercel / Expo static hosting.
