@@ -1,0 +1,14 @@
+energy_rank,appliance,appliance_category,houses,meters,total_observations,total_coverage_hours,avg_coverage_hours_per_meter,avg_power_w,avg_energy_kwh_per_meter,total_energy_kwh,avg_energy_kwh_per_hour,avg_energy_kwh_per_day,avg_actual_sample_period_sec,native_sample_period_sec,source_dataset,power_rank
+1,light,lighting,6,19,7637433,8055.34,423.965,25.14,10.348,196.606,0.024,0.586,3.813,3,REDD,4
+2,fridge,refrigeration,5,5,1926129,1983.929,396.786,62.975,24.753,123.763,0.062,1.497,3.716,3,REDD,2
+3,sockets,outlets,6,24,9343028,9684.52,403.522,12.494,5.041,120.993,0.012,0.3,3.745,3,REDD,8
+4,washer_dryer,laundry,6,9,3726894,3899.857,433.317,17.901,7.886,70.977,0.018,0.437,3.774,3,REDD,5
+5,electric_furnace,heating,3,3,1054887,1119.778,373.259,63.008,23.398,70.195,0.063,1.504,3.849,3,REDD,1
+6,air_conditioner,hvac,2,5,2465025,2491.225,498.245,16.277,7.102,35.511,0.014,0.342,3.584,3,REDD,6
+7,dish_washer,water,6,6,2496492,2588.503,431.417,11.752,5.268,31.61,0.012,0.293,3.732,3,REDD,9
+8,microwave,cooking,4,4,1549161,1645.177,411.294,15.945,6.62,26.479,0.016,0.386,3.836,3,REDD,7
+9,electric_space_heater,heating,3,4,1283680,1309.95,327.488,9.682,2.971,11.885,0.009,0.218,3.729,3,REDD,10
+10,air_handling_unit,hvac,1,1,376968,338.752,338.752,28.692,9.608,9.608,0.028,0.681,3.235,3,REDD,3
+11,electric_oven,cooking,1,2,1491756,1592.299,796.15,5.547,4.41,8.819,0.006,0.133,3.843,3,REDD,11
+12,electric_stove,cooking,4,4,2011968,2073.299,518.325,3.637,1.875,7.5,0.004,0.087,3.666,3,REDD,12
+13,waste_disposal_unit,water,3,3,803283,849.027,283.009,0.081,0.023,0.069,0.0,0.002,3.834,3,REDD,13
