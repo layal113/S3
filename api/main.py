@@ -52,10 +52,18 @@ SENTRY_DSN = os.getenv("SENTRY_DSN")
 if SENTRY_DSN:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
+        # Add data like request headers and IP for users
+        send_default_pii=True,
+        # Enable sending logs to Sentry
+        enable_logs=True,
+        # Set traces_sample_rate to 1.0 to capture 100% of transactions for tracing.
         traces_sample_rate=1.0,
-        send_default_pii=False,
+        # Set profile_session_sample_rate to 1.0 to profile 100% of profile sessions.
+        profile_session_sample_rate=1.0,
+        # Set profile_lifecycle to "trace" to automatically run the profiler on when there is an active transaction
+        profile_lifecycle="trace",
     )
-    logger.info("Sentry error monitoring initialized.")
+    logger.info("Sentry error & performance monitoring initialized.")
 else:
     logger.info("SENTRY_DSN not configured; Sentry monitoring is disabled.")
 DEBUG_BREAKPOINTS_ENABLED = os.getenv("MIQYAS_DEBUG_BREAKPOINTS") == "1"
@@ -153,7 +161,7 @@ def read_root():
 
 
 @app.get("/sentry-debug")
-def trigger_sentry_unhandled_error():
+async def trigger_sentry_unhandled_error():
     """Trigger an unhandled ZeroDivisionError to verify automatic Sentry error capture."""
     division_by_zero = 1 / 0
     return {"result": division_by_zero}

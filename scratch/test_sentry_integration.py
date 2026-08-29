@@ -1,20 +1,16 @@
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Set test DSN before importing main
-TEST_DSN = "https://examplePublicKey@o0.ingest.sentry.io/12345"
-os.environ["SENTRY_DSN"] = TEST_DSN
-
 import sentry_sdk
 from fastapi.testclient import TestClient
 
-# Import app (which initializes Sentry with SENTRY_DSN)
-from api.main import app
+# Import app (loads .env and initializes Sentry)
+from api.main import app, SENTRY_DSN
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -24,8 +20,8 @@ def test_sentry_integration():
     # 1. Verify Sentry client is active with configured DSN
     sentry_client = sentry_sdk.get_client()
     assert sentry_client is not None, "Sentry client should be initialized"
-    assert sentry_client.dsn == TEST_DSN, f"Expected DSN {TEST_DSN}, got {sentry_client.dsn}"
-    print(f"[PASS] Sentry client initialized with DSN: {sentry_client.dsn}")
+    assert sentry_client.dsn == SENTRY_DSN, f"Expected DSN {SENTRY_DSN}, got {sentry_client.dsn}"
+    print(f"[PASS] Sentry client successfully initialized with DSN: {sentry_client.dsn}")
 
     # 2. Test Root Endpoint
     res_root = client.get("/")
@@ -46,13 +42,11 @@ def test_sentry_integration():
         print(f"       Generated Sentry Event ID: {res_json['sentry_event_id']}")
 
     # 4. Test Unhandled Exception Capture Endpoint
-    # When an unhandled error occurs in FastAPI, the Starlette/FastAPI Sentry integration intercepts it
-    with patch.object(sentry_sdk.Hub.current if hasattr(sentry_sdk, "Hub") else sentry_sdk, "capture_exception", wraps=sentry_sdk.capture_exception) as mock_unhandled:
-        res_unhandled = client.get("/sentry-debug")
-        assert res_unhandled.status_code == 500
-        print("[PASS] Unhandled error endpoint /sentry-debug returned 500 Internal Server Error")
+    res_unhandled = client.get("/sentry-debug")
+    assert res_unhandled.status_code == 500
+    print("[PASS] Unhandled error endpoint /sentry-debug returned 500 Internal Server Error")
 
-    print("\n[ALL TESTS PASSED SUCCESSFULLY!]")
+    print("\n[ALL SENTRY INTEGRATION TESTS PASSED SUCCESSFULLY!]")
 
 if __name__ == "__main__":
     test_sentry_integration()
