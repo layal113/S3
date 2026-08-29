@@ -37,8 +37,11 @@ from api.schemas import (
 )
 from simulator.generate_household import generate_synthetic_household
 from model.predict import predict_disaggregation
-from data.config import MINIMUM_FEATURE_WINDOW_SIZE, CATEGORY_DISPLAY_NAMES
+from data.config import MINIMUM_FEATURE_WINDOW_SIZE, CATEGORY_DISPLAY_NAMES, ARTIFACTS_DIR
 import sentry_sdk
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
@@ -94,6 +97,10 @@ app = FastAPI(
     description="FastAPI backend serving trained appliance-disaggregation ML model and household signal simulator.",
     version="1.0.0",
 )
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configure CORS for Expo dev servers, Android Emulator (10.0.2.2), and local LAN IPs
 origins = [
@@ -157,6 +164,22 @@ def read_root():
         "service": "Miqyas ML Disaggregation API",
         "version": "1.0.0",
         "docs": "/docs",
+    }
+
+
+@app.get("/health")
+def health_check():
+    """
+    Health check endpoint returning service status and verifying
+    that all trained ML model artifacts and metadata files are loaded on disk.
+    """
+    expected_categories = ["fridge", "lighting", "other", "ac_hvac"]
+    models_exist = all(
+        (ARTIFACTS_DIR / f"{cat}_model.joblib").exists() for cat in expected_categories
+    ) and (ARTIFACTS_DIR / "metadata.json").exists()
+    return {
+        "status": "ok",
+        "models_loaded": models_exist,
     }
 
 
@@ -727,15 +750,16 @@ def gemini_text(response: Dict[str, Any]) -> str:
 
 
 @app.post("/v1/smart-tips/generate", response_model=SmartTipsResponse)
-def generate_smart_tips(request: SmartTipsRequest):
+@limiter.limit("10/minute")
+def generate_smart_tips(request: Request, payload: SmartTipsRequest):
     prompt = f"""You are an energy efficiency advisor. Based on the household data below, generate exactly 4 personalized energy-saving tips.
 
 Household data:
-- Home type: {request.home_type}
-- Occupants: {request.occupants}
-- Avg daily usage: {request.avg_kwh} kWh
-- Detected anomalies: {request.anomalies_summary}
-- Top energy-consuming periods: {request.peak_hours}
+- Home type: {payload.home_type}
+- Occupants: {payload.occupants}
+- Avg daily usage: {payload.avg_kwh} kWh
+- Detected anomalies: {payload.anomalies_summary}
+- Top energy-consuming periods: {payload.peak_hours}
 
 Rules:
 - Each tip must be specific to this household's data, not generic advice
@@ -815,9 +839,10 @@ Return ONLY valid JSON, no markdown, no preamble, in this exact schema:
 
 
 @app.post("/v1/smart-tips/chat", response_model=TipChatResponse)
-def chat_about_tip(request: TipChatRequest):
-    household = request.household_data
-    tip = request.tip
+@limiter.limit("10/minute")
+def chat_about_tip(request: Request, payload: TipChatRequest):
+    household = payload.household_data
+    tip = payload.tip
     system_context = f"""You are an energy efficiency advisor discussing ONE specific tip with a homeowner.
 
 Household context:
@@ -831,9 +856,9 @@ Summary: {tip.summary}
 Answer the user's follow-up questions about this tip specifically — implementation steps, cost estimates, why it applies to their home, alternatives if this doesn't work for them. Stay focused on this tip unless the user clearly asks about something else. Keep responses conversational and concise (2-4 sentences unless they ask for detail)."""
     contents = [
         {"role": message.role, "parts": [{"text": message.text}]}
-        for message in request.conversation_history
+        for message in payload.conversation_history
     ]
-    contents.append({"role": "user", "parts": [{"text": request.user_message}]})
+    contents.append({"role": "user", "parts": [{"text": payload.user_message}]})
     response = call_gemini(
         {
             "systemInstruction": {"parts": [{"text": system_context}]},

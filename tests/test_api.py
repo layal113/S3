@@ -79,3 +79,11 @@ def test_dashboard_endpoint():
     assert "tariffStatus" in data
     assert "applianceBreakdown" in data
     assert "recommendation" in data
+
+
+def test_health_endpoint():
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["models_loaded"] is True
