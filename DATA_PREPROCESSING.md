@@ -52,10 +52,23 @@ RAW_CATEGORY_MAP = {
 }
 ```
 
-### 2.3 Binary State Binarization
-For supervised binary classification, continuous appliance power values (Watts) are binarized into operational ON/OFF states using a standard baseline threshold:
+### 2.3 Binary State Binarization & 10.0W Ground-Truth Activation Threshold
+For supervised binary classification, continuous appliance power values (Watts) are binarized into operational ON/OFF ground-truth targets using a uniform baseline threshold:
 $$y_{c, t} = \mathbb{I}(\text{power}_{c, t} \ge 10.0\text{ W})$$
 Any sub-metered power reading exceeding 10.0 Watts is labeled as active state (1), while standby or quiescent draw below 10.0 Watts is labeled as inactive (0).
+
+**Why a Uniform 10.0W Threshold Does Not Introduce Labeling Noise Across Different Power Scales:**
+1. **Sub-Meter Channel Isolation (Not Aggregate Mains)**: The 10.0W threshold is applied directly to **individual sub-metered appliance channels**, never to the whole-house mains signal.
+   - **Air Conditioner Sub-Meter**: When inactive, standby electronics draw $0\text{W} - 5\text{W}$. When active, compressor draw jumps to $1200\text{W} - 1800\text{W}$. The 10.0W threshold sits cleanly in the large gap between 5W idle and 1200W operation.
+   - **Refrigerator Sub-Meter**: When the compressor is off, quiescent control draw is $1\text{W} - 5\text{W}$. When the compressor cycles on, draw rises to $80\text{W} - 120\text{W}$. The 10.0W threshold cleanly isolates active cooling cycles.
+   - **Lighting Sub-Meter**: When lights are switched off, sub-meter draw is $0\text{W}$. When a single fixture or LED bulb is switched on, draw is $15\text{W} - 150\text{W}$, immediately clearing the 10.0W floor.
+2. **Standby Noise Gate**: Across all sub-metered circuits in UK-DALE and IAWE, background quantization noise, current transformer drift, and phantom standby power hover strictly below 5.0W. Thus, 10.0W functions as a universal *standby noise gate*.
+3. **Decoupled Classification vs. Power Integration**: The binary models only predict the discrete active state ($y_c \in \{0, 1\}$). Actual physical power scale assignment and consumption integration during inference are handled distinctly per category in [model/predict.py](file:///a:/S3/model/predict.py):
+   - `fridge`: $100.0\text{W}$ nominal active draw
+   - `lighting`: $15.0\text{W}$ nominal active draw
+   - `ac_hvac`: $1600.0\text{W}$ nominal compressor draw
+   - `other`: residual dynamic allocation ($P_{\text{mains}} - \sum P_{\text{known}}$)
+4. **Per-Category Decision Thresholds**: While the ground-truth binarization threshold on sub-meters is 10.0W, the **probabilistic classification thresholds** applied during inference are tuned per category (`lighting: 0.15`, `fridge: 0.40`, `ac_hvac: 0.40`, `other: 0.35`).
 
 ---
 

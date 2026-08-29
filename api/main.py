@@ -55,8 +55,8 @@ SENTRY_DSN = os.getenv("SENTRY_DSN")
 if SENTRY_DSN:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-        # Add data like request headers and IP for users
-        send_default_pii=True,
+        # Do not attach sensitive PII like headers and client IP by default
+        send_default_pii=False,
         # Enable sending logs to Sentry
         enable_logs=True,
         # Set traces_sample_rate to 1.0 to capture 100% of transactions for tracing.

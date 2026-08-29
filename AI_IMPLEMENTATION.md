@@ -10,15 +10,20 @@ Miqyas integrates a dual-tier artificial intelligence pipeline:
 
 ## 2. Appliance Disaggregation Machine Learning Model
 
-### 2.1 Problem Formulation
-Non-Intrusive Load Monitoring (NILM) addresses the problem of inferring the power draw and operating states of individual home appliances from a single aggregated whole-house power signal measured at the utility meter. 
+### 2.1 Problem Formulation & Binary Model Architecture
+Non-Intrusive Load Monitoring (NILM) addresses the problem of inferring the power draw and operating states of individual home appliances from a single aggregated whole-house power signal measured at the utility meter.
 
-In the Miqyas backend, disaggregation is framed as a supervised multi-label binary classification problem evaluated over rolling sliding windows:
-$$\hat{y}_c(t) = f_c(\mathbf{x}_t), \quad c \in \{\text{fridge}, \text{lighting}, \text{ac\_hvac}, \text{other}\}$$
-where $\mathbf{x}_t \in \mathbb{R}^8$ represents the 8-dimensional feature vector extracted over a 15-minute rolling window around timestamp $t$, and $f_c$ is the dedicated model for appliance category $c$.
+In the Miqyas backend, disaggregation is implemented via **four independent binary Random Forest classifiers** ($f_{\text{fridge}}$, $f_{\text{lighting}}$, $f_{\text{ac\_hvac}}$, $f_{\text{other}}$) rather than a single monolithic multi-label model:
+$$\hat{y}_c(t) = f_c(\mathbf{x}_t) \in [0, 1], \quad c \in \{\text{fridge}, \text{lighting}, \text{ac\_hvac}, \text{other}\}$$
+where $\mathbf{x}_t \in \mathbb{R}^8$ represents the 8-dimensional feature vector extracted over a 15-minute rolling window around timestamp $t$, and $f_c$ is the independent binary classifier for category $c$.
+
+This binary decomposition architecture provides three key advantages:
+1. **Per-Category Decision Thresholds**: Enables distinct classification thresholds tailored to each appliance's unique electrical signature and class imbalance (e.g., $0.15$ for lighting vs. $0.40$ for AC compressor loads), avoiding the recall collapse of uniform multi-class argmax boundaries.
+2. **Concurrent Multi-Appliance Activation**: Naturally supports simultaneous appliance co-occurrence (e.g., refrigerator compressor cycling while air conditioning and lighting are concurrently active).
+3. **Modular Retraining & Calibration**: Individual appliance classifiers can be updated, calibrated against regional pilot data, or added independently without requiring a complete retraining of all other models.
 
 ### 2.2 Why Random Forest?
-A Random Forest Classifier was selected over deep neural architectures (such as Sequence-to-Sequence CNNs or Recurrent Neural Networks) based on core engineering tradeoffs:
+A Random Forest Classifier was selected for each binary model over deep neural architectures (such as Sequence-to-Sequence CNNs or Recurrent Neural Networks) based on core engineering tradeoffs:
 - **Tabular & Non-Linear Feature Suitability**: Tree ensembles natively partition continuous power signals and capture non-linear step-changes (e.g. compressor cycle starts vs. baseline standby noise) without requiring deep feature representations.
 - **Invariance to Monotonic Transformations & Scaling**: Random Forests do not require complex feature normalization or gradient optimization tuning, ensuring consistent inference stability across variable household baselines.
 - **Low-Latency, Database-Free Inference**: Frozen `.joblib` model binaries load into memory in under 50 milliseconds and execute inference in under 5 milliseconds per 15-minute window, permitting cost-effective deployment on memory-constrained compute environments.
