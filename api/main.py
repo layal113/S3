@@ -106,10 +106,9 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Configure CORS for deployed Render backend, Vercel frontend, and local dev environments
+# Configure CORS for deployed Render backend, Render Static Site frontend, and local dev environments
 default_origins = [
     "https://s3-d0wz.onrender.com",
-    "https://s3-app.vercel.app",
     "http://localhost:8081",
     "http://localhost:19006",
     "http://localhost:3000",
@@ -129,6 +128,7 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -15,7 +15,7 @@ function getApiBaseUrl(): string {
     return cleanUrl(configuredUrl.trim());
   }
 
-  // In production builds (e.g. Vercel deployment or production mobile releases), point to the deployed Render backend
+  // In production builds (e.g. Render Static Site deployment or production mobile releases), point to the deployed Render backend
   if (
     process.env.NODE_ENV === 'production' ||
     (typeof __DEV__ !== 'undefined' && !__DEV__)
