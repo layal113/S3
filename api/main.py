@@ -106,8 +106,10 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Configure CORS for Expo dev servers, Android Emulator (10.0.2.2), and local LAN IPs
-origins = [
+# Configure CORS for deployed Render backend, Vercel frontend, and local dev environments
+default_origins = [
+    "https://s3-d0wz.onrender.com",
+    "https://s3-app.vercel.app",
     "http://localhost:8081",
     "http://localhost:19006",
     "http://localhost:3000",
@@ -116,8 +118,13 @@ origins = [
     "http://127.0.0.1:8000",
     "http://10.0.2.2:8000",
     "http://10.0.2.2:8081",
-    "*",
 ]
+
+custom_origins = os.getenv("CORS_ORIGINS")
+if custom_origins:
+    origins = [orig.strip() for orig in custom_origins.split(",") if orig.strip()]
+else:
+    origins = default_origins
 
 app.add_middleware(
     CORSMiddleware,
