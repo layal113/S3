@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radii, spacing, typography } from '../theme';
+import { borders, colors, radii, spacing, typography } from '../theme';
 import { formatUpdatedTime } from '../utils/format';
+import { feedback } from '../utils/feedback';
 import { MiqyasBrand } from './MiqyasBrand';
 
 export function HomeHeader({
@@ -13,6 +14,7 @@ export function HomeHeader({
   residents,
   billingPeriodLabel,
   updatedAt,
+  simulationScenario,
   onProfilePress,
 }: {
   userName: string;
@@ -22,6 +24,7 @@ export function HomeHeader({
   residents: number;
   billingPeriodLabel: string;
   updatedAt: string;
+  simulationScenario: string;
   onProfilePress: () => void;
 }) {
   return (
@@ -42,14 +45,25 @@ export function HomeHeader({
           <Text style={styles.meta}>
             Last updated: {formatUpdatedTime(updatedAt)}
           </Text>
+          <View style={styles.scenarioBadge}>
+            <Ionicons
+              color={colors.primary}
+              name="sparkles-outline"
+              size={14}
+            />
+            <Text style={styles.scenarioText}>{simulationScenario}</Text>
+          </View>
         </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Open profile"
-          onPress={onProfilePress}
-          style={styles.profile}
+          onPress={() => {
+            void feedback.selection();
+            onProfilePress();
+          }}
+          style={({ pressed }) => [styles.profile, pressed && styles.pressed]}
         >
-          <Ionicons color={colors.primary} name="person-outline" size={38} />
+          <Ionicons color={colors.primary} name="person-outline" size={31} />
         </Pressable>
       </View>
     </View>
@@ -63,14 +77,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   profile: {
+    ...borders.card,
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderRadius: radii.pill,
-    height: 72,
+    height: 62,
     justifyContent: 'center',
-    marginRight: 44,
-    width: 72,
+    width: 62,
   },
+  pressed: { opacity: 0.82, transform: [{ scale: 0.97 }] },
   householdRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -86,4 +101,21 @@ const styles = StyleSheet.create({
   },
   household: { ...typography.heading, color: colors.text },
   meta: { fontSize: 12, lineHeight: 17, color: colors.textMuted },
+  scenarioBadge: {
+    ...borders.subtle,
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.tealSoft,
+    borderRadius: radii.pill,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  scenarioText: {
+    ...typography.label,
+    color: colors.primaryDark,
+    fontSize: 11,
+  },
 });

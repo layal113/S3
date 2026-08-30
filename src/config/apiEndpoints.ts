@@ -24,4 +24,6 @@ export const apiEndpoints = {
     `/v1/households/${householdId}/usage/history`,
   recommendations: (householdId: string) =>
     `/v1/households/${householdId}/recommendations`,
+  smartTips: '/v1/smart-tips/generate',
+  smartTipChat: '/v1/smart-tips/chat',
 } as const;

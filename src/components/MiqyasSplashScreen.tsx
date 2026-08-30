@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
+import { useReducedMotion } from '../hooks/useReducedMotion';
+
 function GaugeIcon({
   size = 108,
   color = '#FFFFFF',
@@ -31,8 +33,13 @@ function GaugeIcon({
 
 export function MiqyasSplashScreen() {
   const [meterLevel] = useState(() => new Animated.Value(0));
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
+    if (reducedMotion) {
+      meterLevel.setValue(1);
+      return;
+    }
     Animated.sequence([
       Animated.delay(450),
       Animated.timing(meterLevel, {
@@ -42,7 +49,7 @@ export function MiqyasSplashScreen() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, [meterLevel]);
+  }, [meterLevel, reducedMotion]);
 
   const needleRotation = meterLevel.interpolate({
     inputRange: [0, 1],

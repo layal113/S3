@@ -3,7 +3,13 @@ export type ApplianceCategory =
   | 'Water heater'
   | 'Refrigerator'
   | 'Lighting'
-  | 'Other/unclassified';
+  | 'Washing machine'
+  | 'Oven'
+  | 'Dishwasher'
+  | 'Electronics'
+  | 'Pool pump'
+  | 'Other/unclassified'
+  | 'Unattributed / baseline';
 
 export type HouseholdId = 'high-ac-home' | 'efficient-flat' | 'family-villa';
 
@@ -16,7 +22,10 @@ export interface ApplianceUsage {
   category: ApplianceCategory;
   consumptionKwh: number;
   sharePercent: number;
-  confidence: 'High' | 'Medium';
+  modelScore?: number;
+  modelScoreLabel?: 'High' | 'Medium' | 'Low' | 'N/A';
+  confidence?: string;
+  notYetTrained?: boolean;
 }
 
 export interface PriorityInsight {
@@ -31,7 +40,7 @@ export interface TariffStatus {
   levelPercent: number;
   remainingKwh: number;
   currentTier: number;
-  nextTier: number;
+  nextTier: number | null;
   projectedToExceed: boolean;
 }
 
@@ -55,6 +64,10 @@ export interface DashboardData {
   tariffStatus: TariffStatus;
   applianceBreakdown: ApplianceUsage[];
   recommendation: Recommendation;
+  simulationScenario: string;
+  simulationSeed: number | null;
+  simulationConfiguration: Record<string, unknown>;
+  simulationEvents: import('./simulation').SimulationEvent[];
   simulated: boolean;
   updatedAt: string;
 }

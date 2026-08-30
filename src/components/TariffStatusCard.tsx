@@ -14,7 +14,11 @@ export function TariffStatusCard({ tariff }: { tariff: TariffStatus }) {
       />
       <View
         accessible
-        accessibilityLabel={`Tier ${tariff.currentTier}. ${tariff.levelPercent} percent toward tier ${tariff.nextTier}. ${tariff.remainingKwh} kilowatt-hours remaining.`}
+        accessibilityLabel={
+          tariff.nextTier === null
+            ? `Tier ${tariff.currentTier}, the highest tariff tier.`
+            : `Tier ${tariff.currentTier}. ${tariff.levelPercent} percent toward tier ${tariff.nextTier}. ${tariff.remainingKwh} kilowatt-hours remaining.`
+        }
         style={styles.card}
       >
         <View style={styles.topRow}>
@@ -25,7 +29,9 @@ export function TariffStatusCard({ tariff }: { tariff: TariffStatus }) {
               size={22}
             />
             <Text style={styles.tier}>
-              Tier {tariff.currentTier} → Tier {tariff.nextTier}
+              {tariff.nextTier === null
+                ? `Tier ${tariff.currentTier} · Highest tier`
+                : `Tier ${tariff.currentTier} → Tier ${tariff.nextTier}`}
             </Text>
           </View>
           <Text style={styles.status}>{tariff.statusLabel}</Text>
