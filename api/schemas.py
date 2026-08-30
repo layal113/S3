@@ -46,6 +46,12 @@ class SimulateUsageRequest(BaseSchema):
     household_id: Optional[str] = Field(default="high-ac-home")
     duration_minutes: Optional[int] = Field(default=60, ge=15, description="Duration in minutes (minimum 15)")
     interval_seconds: Optional[int] = Field(default=60)
+    mode: Literal["surprise", "preset", "custom", "replay"] = "surprise"
+    scenario_id: Optional[str] = None
+    seed: Optional[int] = None
+    use_profile: bool = False
+    profile: Optional[Dict[str, Any]] = None
+    conditions: Optional[Dict[str, Any]] = None
 
 
 class SimulatedReading(BaseSchema):
@@ -54,8 +60,19 @@ class SimulatedReading(BaseSchema):
     appliances: Dict[str, float]
 
 
+class SimulationEvent(BaseSchema):
+    time: str
+    title: str
+    detail: str
+
+
 class SimulateUsageResponse(BaseSchema):
     household_id: str
+    scenario_id: str
+    scenario_label: str
+    seed: int
+    configuration: Dict[str, Any]
+    events: List[SimulationEvent]
     timestamp_start: str
     timestamp_end: str
     reading_count: int
@@ -76,7 +93,7 @@ class PriorityInsight(BaseSchema):
 
 class TariffStatus(BaseSchema):
     current_tier: int
-    next_tier: int
+    next_tier: Optional[int]
     status_label: str
     detail: str
     level_percent: float
@@ -98,6 +115,10 @@ class DashboardResponse(BaseSchema):
     tariff_status: TariffStatus
     appliance_breakdown: List[ApplianceBreakdownItem]
     recommendation: RecommendationResponse
+    simulation_scenario: str
+    simulation_seed: Optional[int]
+    simulation_configuration: Dict[str, Any]
+    simulation_events: List[SimulationEvent]
     simulated: bool
     updated_at: str
 
@@ -112,6 +133,11 @@ class HistoryPointAppliances(BaseModel):
     waterHeater: HistoryPointAppliance = Field(..., serialization_alias="waterHeater")
     refrigerator: HistoryPointAppliance = Field(..., serialization_alias="refrigerator")
     lighting: HistoryPointAppliance = Field(..., serialization_alias="lighting")
+    washingMachine: HistoryPointAppliance = Field(..., serialization_alias="washingMachine")
+    oven: HistoryPointAppliance
+    dishwasher: HistoryPointAppliance
+    electronics: HistoryPointAppliance
+    poolPump: HistoryPointAppliance = Field(..., serialization_alias="poolPump")
     other: HistoryPointAppliance = Field(..., serialization_alias="other")
 
 
@@ -126,9 +152,20 @@ class HistoryPoint(BaseModel):
 
 
 class UsageHistoryResponse(BaseSchema):
+    household_id: str
     period: Literal["7d", "4w", "6m"]
     granularity: Literal["day", "week", "month"]
     date_range_label: str
+    scenario_label: str
+    simulation_seed: Optional[int]
+    period_total_kwh: float
+    period_estimated_cost_egp: float
+    billing_cycle_kwh: float
+    billing_cycle_cost_egp: float
+    projected_monthly_kwh: float
+    projected_monthly_cost_egp: float
+    available_appliances: List[str]
+    billing_cycle_appliances: Dict[str, HistoryPointAppliance]
     points: List[HistoryPoint]
 
 
@@ -159,8 +196,8 @@ class TipChatMessage(BaseSchema):
 
 
 class TipChatRequest(BaseSchema):
-    tip: SmartTip
-    household_data: SmartTipsRequest
+    tip: Optional[SmartTip] = None
+    full_usage_data: Dict[str, Any]
     conversation_history: List[TipChatMessage]
     user_message: str
 

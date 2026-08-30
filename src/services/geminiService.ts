@@ -1,5 +1,6 @@
 import { env } from '../config/env';
 import type {
+  FullUsageData,
   HouseholdTipData,
   SmartTip,
   SmartTipCategory,
@@ -23,17 +24,22 @@ async function postJson(path: string, body: unknown): Promise<unknown> {
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     const detail =
-      payload && typeof payload === 'object' && 'detail' in payload
-        ? String(payload.detail)
+      payload && typeof payload === 'object'
+        ? 'detail' in payload
+          ? String(payload.detail)
+          : 'error' in payload
+            ? String(payload.error)
+            : 'The Smart Tips service is unavailable.'
         : 'The Smart Tips service is unavailable.';
-    console.error(
-      `[SmartTipsService] Request failed (${response.status}): ${detail}`,
-    );
     if (response.status === 429) {
+      console.warn(`[SmartTipsService] Rate limited: ${detail}`);
       throw new Error(
         'Smart Tips is temporarily rate-limited. Wait about a minute, then retry.',
       );
     }
+    console.error(
+      `[SmartTipsService] Request failed (${response.status}): ${detail}`,
+    );
     throw new Error('Smart Tips is unavailable right now. Please try again.');
   }
   return payload;
@@ -66,14 +72,14 @@ export async function generateSmartTips(
 }
 
 export async function sendTipChatMessage(
-  tip: SmartTip,
-  householdData: HouseholdTipData,
+  tip: SmartTip | null,
+  fullUsageData: FullUsageData,
   history: TipChatMessage[],
   userMessage: string,
 ): Promise<string> {
   const payload = await postJson('/v1/smart-tips/chat', {
     tip,
-    householdData,
+    fullUsageData,
     conversationHistory: history.map(({ role, text }) => ({ role, text })),
     userMessage,
   });

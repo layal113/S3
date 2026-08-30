@@ -13,6 +13,7 @@ export function HomeHeader({
   residents,
   billingPeriodLabel,
   updatedAt,
+  simulationScenario,
   onProfilePress,
 }: {
   userName: string;
@@ -22,6 +23,7 @@ export function HomeHeader({
   residents: number;
   billingPeriodLabel: string;
   updatedAt: string;
+  simulationScenario: string;
   onProfilePress: () => void;
 }) {
   return (
@@ -42,6 +44,14 @@ export function HomeHeader({
           <Text style={styles.meta}>
             Last updated: {formatUpdatedTime(updatedAt)}
           </Text>
+          <View style={styles.scenarioBadge}>
+            <Ionicons
+              color={colors.primary}
+              name="sparkles-outline"
+              size={14}
+            />
+            <Text style={styles.scenarioText}>{simulationScenario}</Text>
+          </View>
         </View>
         <Pressable
           accessibilityRole="button"
@@ -86,4 +96,20 @@ const styles = StyleSheet.create({
   },
   household: { ...typography.heading, color: colors.text },
   meta: { fontSize: 12, lineHeight: 17, color: colors.textMuted },
+  scenarioBadge: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.tealSoft,
+    borderRadius: radii.pill,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  scenarioText: {
+    ...typography.label,
+    color: colors.primaryDark,
+    fontSize: 11,
+  },
 });

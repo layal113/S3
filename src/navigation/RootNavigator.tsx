@@ -125,6 +125,7 @@ export function RootNavigator({
         <Tab.Screen name="Smart Tips">
           {() => (
             <SmartTipsScreen
+              historyService={historyService}
               key={selectedHouseholdId}
               service={dashboardService}
             />

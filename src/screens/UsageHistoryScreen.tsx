@@ -21,15 +21,25 @@ import type {
   HistoryUnit,
   UsageHistoryData,
 } from '../types/history';
+import { formatEgp, formatNumber } from '../utils/format';
 
-const appliances: { id: HistoryAppliance; label: string }[] = [
-  { id: 'total', label: 'Total home' },
-  { id: 'airConditioner', label: 'AC' },
-  { id: 'waterHeater', label: 'Water heater' },
-  { id: 'refrigerator', label: 'Refrigerator' },
-  { id: 'lighting', label: 'Lighting' },
-  { id: 'other', label: 'Other' },
-];
+const applianceLabels: Record<HistoryAppliance, string> = {
+  total: 'Total home',
+  airConditioner: 'AC',
+  waterHeater: 'Water heater',
+  refrigerator: 'Refrigerator',
+  lighting: 'Lighting',
+  washingMachine: 'Washing machine',
+  oven: 'Oven',
+  dishwasher: 'Dishwasher',
+  electronics: 'Electronics',
+  poolPump: 'Pool pump',
+  other: 'Other',
+};
+
+function displayValue(value: number, unit: HistoryUnit) {
+  return unit === 'kwh' ? `${formatNumber(value)} kWh` : formatEgp(value);
+}
 
 function Toggle<T extends string>({
   items,
@@ -109,10 +119,53 @@ export function UsageHistoryScreen({
   }, [dataRevision, period, requestKey, retry, selectedHouseholdId, service]);
   const currentData =
     data?.period === period && loadedRequestKey === requestKey ? data : null;
+  const availableFilters: { id: HistoryAppliance; label: string }[] = [
+    { id: 'total', label: applianceLabels.total },
+    ...(currentData?.availableAppliances ?? []).map((id) => ({
+      id,
+      label: applianceLabels[id],
+    })),
+  ];
+  const activeAppliance = availableFilters.some((item) => item.id === appliance)
+    ? appliance
+    : 'total';
   const selectedAnomaly = useMemo(
     () => currentData?.points[selectedIndex]?.anomaly,
     [currentData, selectedIndex],
   );
+  const selectedRangeValue = useMemo(() => {
+    if (!currentData) return 0;
+    return currentData.points.reduce((sum, point) => {
+      if (activeAppliance === 'total') {
+        return sum + (unit === 'kwh' ? point.totalKWh : point.estimatedCostEGP);
+      }
+      const selected = point.appliances[activeAppliance];
+      return (
+        sum + (unit === 'kwh' ? (selected?.kWh ?? 0) : (selected?.costEGP ?? 0))
+      );
+    }, 0);
+  }, [activeAppliance, currentData, unit]);
+  const billingCycleTotal = currentData
+    ? unit === 'kwh'
+      ? currentData.billingCycleKWh
+      : currentData.billingCycleCostEgp
+    : 0;
+  const projectedTotal = currentData
+    ? unit === 'kwh'
+      ? currentData.projectedMonthlyKWh
+      : currentData.projectedMonthlyCostEgp
+    : 0;
+  const selectedBillingValue = currentData
+    ? activeAppliance === 'total'
+      ? billingCycleTotal
+      : unit === 'kwh'
+        ? (currentData.billingCycleAppliances[activeAppliance]?.kWh ?? 0)
+        : (currentData.billingCycleAppliances[activeAppliance]?.costEGP ?? 0)
+    : 0;
+  const selectedBillingShare =
+    billingCycleTotal > 0
+      ? (selectedBillingValue / billingCycleTotal) * 100
+      : 0;
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
@@ -143,19 +196,19 @@ export function UsageHistoryScreen({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.applianceFilters}
         >
-          {appliances.map((item) => (
+          {availableFilters.map((item) => (
             <Pressable
               key={item.id}
               onPress={() => setAppliance(item.id)}
               style={[
                 styles.filter,
-                appliance === item.id && styles.activeFilter,
+                activeAppliance === item.id && styles.activeFilter,
               ]}
             >
               <Text
                 style={[
                   styles.filterText,
-                  appliance === item.id && styles.activeFilterText,
+                  activeAppliance === item.id && styles.activeFilterText,
                 ]}
               >
                 {item.label}
@@ -201,11 +254,68 @@ export function UsageHistoryScreen({
           </View>
         ) : (
           <>
+            <View style={styles.reconciliationCard}>
+              <View style={styles.reconciliationHeader}>
+                <View style={styles.connectedIcon}>
+                  <Ionicons color={colors.success} name="checkmark" size={17} />
+                </View>
+                <View style={styles.reconciliationCopy}>
+                  <Text style={styles.reconciliationTitle}>
+                    Matched with Home
+                  </Text>
+                  <Text style={styles.reconciliationScenario}>
+                    {currentData.scenarioLabel} · simulation #
+                    {currentData.simulationSeed ?? '—'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.summaryGrid}>
+                <View style={styles.summaryItem}>
+                  <Text
+                    adjustsFontSizeToFit
+                    numberOfLines={1}
+                    style={styles.summaryValue}
+                  >
+                    {displayValue(billingCycleTotal, unit)}
+                  </Text>
+                  <Text style={styles.summaryLabel}>Home · used so far</Text>
+                </View>
+                <View style={styles.summaryItem}>
+                  <Text
+                    adjustsFontSizeToFit
+                    numberOfLines={1}
+                    style={styles.summaryValue}
+                  >
+                    {displayValue(projectedTotal, unit)}
+                  </Text>
+                  <Text style={styles.summaryLabel}>
+                    Home · projected month
+                  </Text>
+                </View>
+                <View style={styles.summaryItem}>
+                  <Text
+                    adjustsFontSizeToFit
+                    numberOfLines={1}
+                    style={styles.summaryValue}
+                  >
+                    {displayValue(selectedRangeValue, unit)}
+                  </Text>
+                  <Text style={styles.summaryLabel}>
+                    {applianceLabels[activeAppliance]} · selected range
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.reconciliationNote}>
+                The first two values exactly match Home. The selected-range
+                subtotal covers {currentData.dateRangeLabel}, so it may differ
+                from the full billing cycle.
+              </Text>
+            </View>
             <View style={styles.chartCard}>
               <View style={styles.chartHeading}>
                 <View>
                   <Text style={styles.cardTitle}>
-                    {appliances.find((item) => item.id === appliance)?.label}
+                    {applianceLabels[activeAppliance]}
                   </Text>
                   <Text style={styles.range}>
                     {currentData.dateRangeLabel} ·{' '}
@@ -215,6 +325,12 @@ export function UsageHistoryScreen({
                         ? 'weekly'
                         : 'monthly'}
                   </Text>
+                  {activeAppliance !== 'total' ? (
+                    <Text style={styles.contribution}>
+                      {formatNumber(selectedBillingShare)}% of the current{' '}
+                      {unit === 'kwh' ? 'usage' : 'estimated cost'}
+                    </Text>
+                  ) : null}
                 </View>
                 <Text style={styles.unit}>
                   {unit === 'kwh' ? 'kWh' : 'EGP'}
@@ -223,7 +339,8 @@ export function UsageHistoryScreen({
               <UsageHistoryChart
                 points={currentData.points}
                 unit={unit}
-                appliance={appliance}
+                appliance={activeAppliance}
+                granularity={currentData.granularity}
                 selectedIndex={selectedIndex}
                 onSelect={(index) => {
                   setSelectedIndex(index);
@@ -311,6 +428,50 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.lg,
   },
+  reconciliationCard: {
+    ...shadows.card,
+    backgroundColor: colors.tealSoft,
+    borderRadius: radii.lg,
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  reconciliationHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  connectedIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radii.pill,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  reconciliationCopy: { flex: 1 },
+  reconciliationTitle: { ...typography.label, color: colors.text },
+  reconciliationScenario: { color: colors.textMuted, fontSize: 11 },
+  summaryGrid: { flexDirection: 'row', gap: spacing.sm },
+  summaryItem: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+    padding: spacing.md,
+  },
+  summaryValue: {
+    ...typography.heading,
+    color: colors.primaryDark,
+    fontSize: 16,
+  },
+  summaryLabel: { color: colors.textMuted, fontSize: 10, lineHeight: 14 },
+  reconciliationNote: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
   chartHeading: {
     alignItems: 'flex-start',
     flexDirection: 'row',
@@ -318,6 +479,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: { ...typography.heading, color: colors.text },
   range: { fontSize: 12, color: colors.textMuted },
+  contribution: { color: colors.teal, fontSize: 11, marginTop: spacing.xs },
   unit: { ...typography.label, color: colors.primary },
   state: {
     alignItems: 'center',

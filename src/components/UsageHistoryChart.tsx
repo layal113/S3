@@ -21,20 +21,22 @@ function valueOf(
   if (appliance === 'total')
     return unit === 'kwh' ? point.totalKWh : point.estimatedCostEGP;
   return unit === 'kwh'
-    ? point.appliances[appliance].kWh
-    : point.appliances[appliance].costEGP;
+    ? (point.appliances[appliance]?.kWh ?? 0)
+    : (point.appliances[appliance]?.costEGP ?? 0);
 }
 
 export function UsageHistoryChart({
   points,
   unit,
   appliance,
+  granularity,
   selectedIndex,
   onSelect,
 }: {
   points: HistoryPoint[];
   unit: HistoryUnit;
   appliance: HistoryAppliance;
+  granularity: 'day' | 'week' | 'month';
   selectedIndex: number;
   onSelect: (index: number) => void;
 }) {
@@ -55,6 +57,7 @@ export function UsageHistoryChart({
   const baselinePath = baselines
     .map((value, index) => `${index ? 'L' : 'M'} ${x(index)} ${y(value)}`)
     .join(' ');
+  const areaPath = `${linePath} L ${x(points.length - 1)} ${y(0)} L ${x(0)} ${y(0)} Z`;
   const selected = points[selectedIndex];
   const unitLabel = unit === 'kwh' ? 'kWh' : 'EGP';
   const spansMultipleMonths =
@@ -62,6 +65,19 @@ export function UsageHistoryChart({
     new Date(points[points.length - 1].timestamp).getTime() -
       new Date(points[0].timestamp).getTime() >
       45 * 24 * 60 * 60 * 1000;
+  const selectedValue = values[selectedIndex];
+  const baselineDifference = selectedValue - baselines[selectedIndex];
+  const pointLabel = (item: HistoryPoint, index: number) => {
+    if (granularity === 'month') {
+      return new Date(item.timestamp).toLocaleDateString('en-EG', {
+        month: 'short',
+      });
+    }
+    if (granularity === 'week') return `W${index + 1}`;
+    return new Date(item.timestamp).toLocaleDateString('en-EG', {
+      weekday: 'short',
+    });
+  };
 
   return (
     <View style={styles.container}>
@@ -91,11 +107,25 @@ export function UsageHistoryChart({
         <SvgText
           fill={colors.textMuted}
           fontSize="10"
+          x="2"
+          y={y(maxValue * 0.5) + 3}
+        >
+          {formatNumber(maxValue * 0.5, 0)}
+        </SvgText>
+        <SvgText
+          fill={colors.textMuted}
+          fontSize="10"
           x="8"
           y={height - plot.bottom + 3}
         >
           0
         </SvgText>
+        <Path
+          d={areaPath}
+          fill={colors.tealSoft}
+          fillOpacity="0.72"
+          stroke="none"
+        />
         {appliance === 'total' ? (
           <Path
             d={baselinePath}
@@ -113,6 +143,26 @@ export function UsageHistoryChart({
           strokeLinejoin="round"
           strokeWidth="3"
         />
+        <Line
+          stroke={colors.primary}
+          strokeDasharray="3 4"
+          strokeOpacity="0.45"
+          strokeWidth="1"
+          x1={x(selectedIndex)}
+          x2={x(selectedIndex)}
+          y1={plot.top}
+          y2={height - plot.bottom}
+        />
+        {points.map((item, index) => (
+          <Circle
+            key={`touch-${item.timestamp}`}
+            cx={x(index)}
+            cy={y(values[index])}
+            fill="transparent"
+            onPress={() => onSelect(index)}
+            r="14"
+          />
+        ))}
         {points.map((item, index) => (
           <Circle
             key={item.timestamp}
@@ -159,15 +209,24 @@ export function UsageHistoryChart({
         </View>
       </View>
       <View style={styles.tooltip}>
-        <Text style={styles.tooltipDate}>
-          {new Date(selected.timestamp).toLocaleDateString('en-EG', {
-            weekday: 'short',
-            day: 'numeric',
-            month: 'short',
-          })}
-        </Text>
+        <View style={styles.tooltipCopy}>
+          <Text style={styles.tooltipDate}>
+            {new Date(selected.timestamp).toLocaleDateString('en-EG', {
+              weekday: granularity === 'day' ? 'short' : undefined,
+              day: granularity === 'month' ? undefined : 'numeric',
+              month: 'short',
+              year: granularity === 'month' ? 'numeric' : undefined,
+            })}
+          </Text>
+          {appliance === 'total' ? (
+            <Text style={styles.tooltipDelta}>
+              {baselineDifference >= 0 ? '+' : ''}
+              {formatNumber(baselineDifference)} {unitLabel} vs baseline
+            </Text>
+          ) : null}
+        </View>
         <Text style={styles.tooltipValue}>
-          {formatNumber(values[selectedIndex])} {unitLabel}
+          {formatNumber(selectedValue)} {unitLabel}
         </Text>
       </View>
       <ScrollView
@@ -184,7 +243,8 @@ export function UsageHistoryChart({
             onPress={() => onSelect(index)}
             style={[
               styles.pointButton,
-              spansMultipleMonths && styles.monthPointButton,
+              (spansMultipleMonths || granularity !== 'day') &&
+                styles.monthPointButton,
               index === selectedIndex && styles.selectedPoint,
             ]}
           >
@@ -194,11 +254,7 @@ export function UsageHistoryChart({
                 index === selectedIndex && styles.selectedPointText,
               ]}
             >
-              {spansMultipleMonths
-                ? new Date(item.timestamp).toLocaleDateString('en-EG', {
-                    month: 'short',
-                  })
-                : index + 1}
+              {pointLabel(item, index)}
             </Text>
           </Pressable>
         ))}
@@ -234,6 +290,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   tooltipDate: { ...typography.label, color: colors.text },
+  tooltipCopy: { flex: 1 },
+  tooltipDelta: { color: colors.textMuted, fontSize: 11 },
   tooltipValue: { ...typography.heading, color: colors.primaryDark },
   pointButtons: { gap: spacing.sm },
   pointButton: {

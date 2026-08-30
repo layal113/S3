@@ -104,7 +104,7 @@ export function ApplianceBreakdown({
                         origin="65,65"
                         r="48"
                         rotation="-90"
-                        stroke={chartColors[index]}
+                        stroke={chartColors[index % chartColors.length]}
                         strokeDasharray={`${dash} ${circumference - dash}`}
                         strokeDashoffset={-currentOffset}
                         strokeWidth="18"
@@ -122,7 +122,10 @@ export function ApplianceBreakdown({
                   <View
                     style={[
                       styles.dot,
-                      { backgroundColor: chartColors[index] },
+                      {
+                        backgroundColor:
+                          chartColors[index % chartColors.length],
+                      },
                     ]}
                   />
                   <View style={styles.applianceCopy}>

@@ -4,6 +4,8 @@ import time
 import uuid
 import calendar
 import json
+import math
+import random
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -75,6 +77,8 @@ TARIFF_THRESHOLDS_KWH = [50.0, 100.0, 200.0, 350.0, 650.0, 1000.0]
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 latest_breakdowns: Dict[str, BreakdownResponse] = {}
 previous_projected_kwh: Dict[str, float] = {}
+latest_simulation_scenarios: Dict[str, str] = {}
+latest_simulation_metadata: Dict[str, Dict[str, Any]] = {}
 
 
 def debug_checkpoint(label: str, **context: Any) -> None:
@@ -280,132 +284,448 @@ def distribute_consumption(total_kwh: float, weights: List[float]) -> List[float
     return distributed
 
 
+INSIGHTS_APPLIANCE_KEYS = [
+    "airConditioner",
+    "waterHeater",
+    "refrigerator",
+    "lighting",
+    "washingMachine",
+    "oven",
+    "dishwasher",
+    "electronics",
+    "poolPump",
+    "other",
+]
+
+
 def appliance_shares(breakdown: BreakdownResponse) -> Dict[str, float]:
-    """Map ML categories to the Insights appliance contract."""
+    """Map every dashboard category into the Insights appliance contract."""
     category_map = {
         "ac_hvac": "airConditioner",
         "water_heater": "waterHeater",
         "fridge": "refrigerator",
         "lighting": "lighting",
+        "washing_machine": "washingMachine",
+        "oven": "oven",
+        "dishwasher": "dishwasher",
+        "electronics": "electronics",
+        "pool_pump": "poolPump",
         "other": "other",
+        "unattributed": "other",
     }
-    shares = {
-        "airConditioner": 0.0,
-        "waterHeater": 0.0,
-        "refrigerator": 0.0,
-        "lighting": 0.0,
-        "other": 0.0,
-    }
+    shares = {key: 0.0 for key in INSIGHTS_APPLIANCE_KEYS}
     for item in breakdown.appliance_breakdown:
         key = category_map.get(item.internal_category, "other")
         shares[key] += max(0.0, item.share_percent / 100.0)
 
     share_sum = sum(shares.values())
     if share_sum <= 0:
-        return {**shares, "other": 1.0}
+        shares["other"] = 1.0
+        return shares
     return {key: value / share_sum for key, value in shares.items()}
 
 
-def build_household_history(
-    household_id: str, period: str
-) -> tuple[str, str, str, List[HistoryPoint]]:
-    """Build history from the same latest breakdown used by the dashboard."""
-    breakdown = get_latest_breakdown(household_id)
-    projection = project_breakdown_to_month(breakdown)
-    now = datetime.utcnow()
-    elapsed_days = max(1.0, projection["elapsed_days"])
-    current_kwh = projection["current_kwh"]
+def stable_history_seed(household_id: str, seed: Optional[int], context: str) -> int:
+    text = f"{household_id}:{context}"
+    text_value = sum((index + 1) * ord(char) for index, char in enumerate(text))
+    return int(seed or 0) + text_value
 
-    if period == "6m":
-        selected_period = "6m"
-        granularity = "month"
-        # Seasonal factors keep earlier months proportional to the current
-        # backend forecast rather than using unrelated fixed totals.
-        month_totals = [
-            round(projection["projected_kwh"] * factor, 1)
-            for factor in [0.72, 0.76, 0.84, 0.92, 1.08, 1.0]
-        ]
-        dates = []
-        for offset in range(5, -1, -1):
-            month_index = now.month - 1 - offset
-            year = now.year + month_index // 12
-            month = month_index % 12 + 1
-            dates.append(datetime(year, month, 1))
-        totals = month_totals
-        date_range_label = (
-            f"{dates[0].strftime('%B')}–{dates[-1].strftime('%B %Y')}"
-        )
-    elif period == "4w":
-        selected_period = "4w"
-        granularity = "week"
-        period_total = current_kwh * min(28.0 / elapsed_days, 1.0)
-        totals = distribute_consumption(period_total, [0.92, 0.98, 1.03, 1.07])
-        dates = [now - timedelta(days=7 * offset) for offset in range(3, -1, -1)]
-        date_range_label = (
-            f"{dates[0].strftime('%d %B')}–{dates[-1].strftime('%d %B %Y')}"
-        )
-    else:
-        selected_period = "7d"
-        granularity = "day"
-        period_total = current_kwh * min(7.0 / elapsed_days, 1.0)
-        totals = distribute_consumption(
-            period_total, [0.91, 0.96, 1.02, 1.18, 1.05, 0.94, 0.99]
-        )
-        dates = [now - timedelta(days=offset) for offset in range(6, -1, -1)]
-        date_range_label = (
-            f"{dates[0].strftime('%d %B')}–{dates[-1].strftime('%d %B %Y')}"
-        )
 
-    shares = appliance_shares(breakdown)
-    baseline = sum(totals) / max(1, len(totals))
-    highest_index = max(range(len(totals)), key=totals.__getitem__)
-    points = []
-    for index, (timestamp, total_kwh) in enumerate(zip(dates, totals)):
-        estimated_cost = round(total_kwh * ESTIMATED_EGP_PER_KWH, 2)
+def month_dates(year: int, month: int, through_day: Optional[int] = None) -> List[datetime]:
+    final_day = through_day or calendar.monthrange(year, month)[1]
+    return [datetime(year, month, day) for day in range(1, final_day + 1)]
+
+
+def shifted_month(value: datetime, offset: int) -> tuple[int, int]:
+    month_index = value.year * 12 + value.month - 1 + offset
+    return month_index // 12, month_index % 12 + 1
+
+
+def scenario_daily_weights(
+    dates: List[datetime],
+    household_id: str,
+    seed: Optional[int],
+    scenario_label: str,
+    configuration: Dict[str, Any],
+    context: str,
+) -> List[float]:
+    """Create replayable daily variation influenced by the active scenario."""
+    if not dates:
+        return []
+    rng = random.Random(stable_history_seed(household_id, seed, context))
+    conditions = configuration.get("conditions", {})
+    if not isinstance(conditions, dict):
+        conditions = {}
+    intensity = str(
+        conditions.get("usageIntensity", conditions.get("usage_intensity", "typical"))
+    )
+    occupancy = str(conditions.get("occupancy", "home"))
+    scenario_text = scenario_label.lower()
+    high_variation = any(
+        word in scenario_text
+        for word in ("heatwave", "hot", "gathering", "busy", "laundry")
+    ) or intensity == "high"
+    low_variation = any(
+        word in scenario_text for word in ("away", "quiet", "conservation")
+    ) or intensity == "low"
+
+    weights = []
+    for index, date in enumerate(dates):
+        weekly_wave = 1.0 + 0.07 * math.sin((index + seed % 7 if seed else index) * 1.7)
+        weekend = 1.08 if date.weekday() >= 5 and occupancy != "away" else 0.98
+        jitter = rng.uniform(-0.11, 0.11)
+        weights.append(max(0.35, weekly_wave * weekend + jitter))
+
+    spike_index = stable_history_seed(household_id, seed, context) % len(weights)
+    weights[spike_index] *= 1.3 if high_variation else (1.08 if low_variation else 1.18)
+    if low_variation and len(weights) > 2:
+        weights[(spike_index + 2) % len(weights)] *= 0.78
+    return weights
+
+
+def build_appliance_energy_rows(
+    daily_totals: List[float],
+    shares: Dict[str, float],
+    household_id: str,
+    seed: Optional[int],
+    context: str,
+) -> List[Dict[str, float]]:
+    """Vary appliance behavior by day while preserving row and category totals."""
+    if not daily_totals:
+        return []
+    rng = random.Random(stable_history_seed(household_id, seed, f"{context}:appliances"))
+    total_kwh = sum(daily_totals)
+    targets = {key: total_kwh * shares[key] for key in INSIGHTS_APPLIANCE_KEYS}
+    matrix: List[Dict[str, float]] = []
+    for index, total in enumerate(daily_totals):
+        row = {}
+        for category_index, key in enumerate(INSIGHTS_APPLIANCE_KEYS):
+            wave = 1.0 + 0.16 * math.sin(index * 1.31 + category_index * 0.83)
+            category_jitter = rng.uniform(0.9, 1.1)
+            row[key] = max(0.0, total * shares[key] * wave * category_jitter)
+        matrix.append(row)
+
+    # Iterative proportional fitting keeps daily totals and billing-cycle
+    # appliance totals reconciled to the same source values.
+    for _ in range(24):
+        for key in INSIGHTS_APPLIANCE_KEYS:
+            current = sum(row[key] for row in matrix)
+            factor = targets[key] / current if current > 0 else 0.0
+            for row in matrix:
+                row[key] *= factor
+        for index, row in enumerate(matrix):
+            current = sum(row.values())
+            factor = daily_totals[index] / current if current > 0 else 0.0
+            for key in INSIGHTS_APPLIANCE_KEYS:
+                row[key] *= factor
+
+    rounded_rows = []
+    for total, row in zip(daily_totals, matrix):
+        rounded = {key: round(value, 2) for key, value in row.items()}
+        adjustment_key = max(rounded, key=rounded.get)
+        rounded[adjustment_key] = round(
+            rounded[adjustment_key] + total - sum(rounded.values()), 2
+        )
+        rounded_rows.append(rounded)
+    return rounded_rows
+
+
+def build_daily_records(
+    dates: List[datetime],
+    target_kwh: float,
+    shares: Dict[str, float],
+    household_id: str,
+    seed: Optional[int],
+    scenario_label: str,
+    configuration: Dict[str, Any],
+    context: str,
+) -> List[Dict[str, Any]]:
+    weights = scenario_daily_weights(
+        dates, household_id, seed, scenario_label, configuration, context
+    )
+    daily_totals = distribute_consumption(target_kwh, weights)
+    energy_rows = build_appliance_energy_rows(
+        daily_totals, shares, household_id, seed, context
+    )
+    records = []
+    cumulative_kwh = 0.0
+    cumulative_cost = 0.0
+    for date, total_kwh, energy_row in zip(dates, daily_totals, energy_rows):
+        cumulative_kwh = round(cumulative_kwh + total_kwh, 2)
+        next_cost = calculate_residential_bill(cumulative_kwh)
+        daily_cost = round(next_cost - cumulative_cost, 2)
+        cumulative_cost = next_cost
+        cost_values = distribute_consumption(
+            daily_cost, [energy_row[key] for key in INSIGHTS_APPLIANCE_KEYS]
+        )
         appliances = {
-            key: {
-                "kWh": round(total_kwh * share, 2),
-                "costEGP": round(estimated_cost * share, 2),
-            }
-            for key, share in shares.items()
+            key: {"kWh": energy_row[key], "costEGP": cost_values[index]}
+            for index, key in enumerate(INSIGHTS_APPLIANCE_KEYS)
         }
+        records.append(
+            {
+                "timestamp": date,
+                "totalKWh": total_kwh,
+                "estimatedCostEGP": daily_cost,
+                "appliances": appliances,
+            }
+        )
+    return records
+
+
+def aggregate_records(
+    records: List[Dict[str, Any]], timestamp: datetime
+) -> Dict[str, Any]:
+    appliances = {
+        key: {
+            "kWh": round(
+                sum(record["appliances"][key]["kWh"] for record in records), 2
+            ),
+            "costEGP": round(
+                sum(record["appliances"][key]["costEGP"] for record in records), 2
+            ),
+        }
+        for key in INSIGHTS_APPLIANCE_KEYS
+    }
+    return {
+        "timestamp": timestamp,
+        "totalKWh": round(sum(record["totalKWh"] for record in records), 2),
+        "estimatedCostEGP": round(
+            sum(record["estimatedCostEGP"] for record in records), 2
+        ),
+        "appliances": appliances,
+    }
+
+
+def history_points(
+    records: List[Dict[str, Any]], scenario_label: str
+) -> List[HistoryPoint]:
+    if not records:
+        return []
+    baseline_kwh = sum(record["totalKWh"] for record in records) / len(records)
+    baseline_cost = (
+        sum(record["estimatedCostEGP"] for record in records) / len(records)
+    )
+    highest_index = max(range(len(records)), key=lambda index: records[index]["totalKWh"])
+    points = []
+    for index, record in enumerate(records):
         anomaly = None
-        if index == highest_index and total_kwh > baseline * 1.05:
+        if index == highest_index and record["totalKWh"] > baseline_kwh * 1.05:
+            difference = round(
+                (record["totalKWh"] / max(baseline_kwh, 0.01) - 1.0) * 100.0
+            )
             anomaly = {
-                "title": "Usage above period baseline",
+                "title": f"{difference}% above this period’s baseline",
                 "explanation": (
-                    "This point is above the household baseline and contributes "
-                    "to the current backend forecast."
+                    f"The {scenario_label.lower()} pattern created the largest "
+                    "usage point in this view. Its energy and cost are already "
+                    "included in the dashboard totals."
                 ),
             }
         points.append(
             HistoryPoint(
-                timestamp=timestamp.date().isoformat(),
-                totalKWh=total_kwh,
-                estimatedCostEGP=estimated_cost,
-                baselineKWh=round(baseline, 2),
-                baselineCostEGP=round(baseline * ESTIMATED_EGP_PER_KWH, 2),
-                appliances=appliances,
+                timestamp=record["timestamp"].date().isoformat(),
+                totalKWh=record["totalKWh"],
+                estimatedCostEGP=record["estimatedCostEGP"],
+                baselineKWh=round(baseline_kwh, 2),
+                baselineCostEGP=round(baseline_cost, 2),
+                appliances=record["appliances"],
                 anomaly=anomaly,
             )
         )
+    return points
 
-    return selected_period, granularity, date_range_label, points
+
+def build_household_history(household_id: str, period: str) -> UsageHistoryResponse:
+    """Build every Insights value from the dashboard's latest breakdown."""
+    breakdown = get_latest_breakdown(household_id)
+    projection = project_breakdown_to_month(breakdown)
+    metadata = latest_simulation_metadata.get(household_id, {})
+    seed = metadata.get("seed")
+    configuration = metadata.get("configuration", {})
+    if not isinstance(configuration, dict):
+        configuration = {}
+    scenario_label = latest_simulation_scenarios.get(
+        household_id, "Representative household day"
+    )
+    now = datetime.utcnow()
+    shares = appliance_shares(breakdown)
+    current_dates = month_dates(now.year, now.month, now.day)
+    current_records = build_daily_records(
+        current_dates,
+        projection["current_kwh"],
+        shares,
+        household_id,
+        seed,
+        scenario_label,
+        configuration,
+        f"{now.year}-{now.month}:current",
+    )
+    current_by_date = {record["timestamp"].date(): record for record in current_records}
+
+    previous_year, previous_month = shifted_month(now, -1)
+    previous_dates = month_dates(previous_year, previous_month)
+    previous_rng = random.Random(
+        stable_history_seed(household_id, seed, f"{previous_year}-{previous_month}:total")
+    )
+    previous_total = round(
+        projection["projected_kwh"] * previous_rng.uniform(0.84, 1.08), 1
+    )
+    previous_records = build_daily_records(
+        previous_dates,
+        previous_total,
+        shares,
+        household_id,
+        seed,
+        scenario_label,
+        configuration,
+        f"{previous_year}-{previous_month}:previous",
+    )
+    previous_by_date = {
+        record["timestamp"].date(): record for record in previous_records
+    }
+    combined_by_date = {**previous_by_date, **current_by_date}
+
+    if period == "6m":
+        selected_period = "6m"
+        granularity = "month"
+        seasonal_factors = {
+            1: 0.78,
+            2: 0.72,
+            3: 0.70,
+            4: 0.76,
+            5: 0.88,
+            6: 1.02,
+            7: 1.12,
+            8: 1.08,
+            9: 0.95,
+            10: 0.82,
+            11: 0.75,
+            12: 0.80,
+        }
+        monthly_records = []
+        for offset in range(-5, 0):
+            year, month = shifted_month(now, offset)
+            rng = random.Random(
+                stable_history_seed(household_id, seed, f"{year}-{month}:month")
+            )
+            target = round(
+                projection["projected_kwh"]
+                * seasonal_factors[month]
+                * rng.uniform(0.94, 1.06),
+                1,
+            )
+            records = build_daily_records(
+                month_dates(year, month),
+                target,
+                shares,
+                household_id,
+                seed,
+                scenario_label,
+                configuration,
+                f"{year}-{month}:history",
+            )
+            monthly_records.append(aggregate_records(records, datetime(year, month, 1)))
+        monthly_records.append(
+            aggregate_records(current_records, datetime(now.year, now.month, 1))
+        )
+        selected_records = monthly_records
+        date_range_label = (
+            f"{monthly_records[0]['timestamp'].strftime('%B')}–"
+            f"{monthly_records[-1]['timestamp'].strftime('%B %Y')}"
+        )
+    else:
+        days = 28 if period == "4w" else 7
+        selected_dates = [
+            (now - timedelta(days=offset)).date()
+            for offset in range(days - 1, -1, -1)
+        ]
+        daily_records = [
+            combined_by_date[date]
+            for date in selected_dates
+            if date in combined_by_date
+        ]
+        date_range_label = (
+            f"{daily_records[0]['timestamp'].strftime('%d %B')}–"
+            f"{daily_records[-1]['timestamp'].strftime('%d %B %Y')}"
+        )
+        if period == "4w":
+            selected_period = "4w"
+            granularity = "week"
+            selected_records = [
+                aggregate_records(chunk, chunk[-1]["timestamp"])
+                for start in range(0, len(daily_records), 7)
+                if (chunk := daily_records[start : start + 7])
+            ]
+        else:
+            selected_period = "7d"
+            granularity = "day"
+            selected_records = daily_records
+
+    points = history_points(selected_records, scenario_label)
+    billing_cycle_appliances = aggregate_records(
+        current_records, current_records[-1]["timestamp"]
+    )["appliances"]
+    return UsageHistoryResponse(
+        household_id=household_id,
+        period=selected_period,
+        granularity=granularity,
+        date_range_label=date_range_label,
+        scenario_label=scenario_label,
+        simulation_seed=seed,
+        period_total_kwh=round(sum(point.totalKWh for point in points), 2),
+        period_estimated_cost_egp=round(
+            sum(point.estimatedCostEGP for point in points), 2
+        ),
+        billing_cycle_kwh=projection["current_kwh"],
+        billing_cycle_cost_egp=round(
+            calculate_residential_bill(projection["current_kwh"]), 1
+        ),
+        projected_monthly_kwh=projection["projected_kwh"],
+        projected_monthly_cost_egp=round(
+            calculate_residential_bill(projection["projected_kwh"]), 1
+        ),
+        available_appliances=[
+            key for key in INSIGHTS_APPLIANCE_KEYS if shares[key] > 0.0001
+        ],
+        billing_cycle_appliances=billing_cycle_appliances,
+        points=points,
+    )
 
 
 def calculate_tariff_status(current_kwh: float, projected_kwh: float) -> TariffStatus:
+    safe_current_kwh = max(0.0, current_kwh)
+    safe_projected_kwh = max(0.0, projected_kwh)
     current_tier = len(TARIFF_THRESHOLDS_KWH) + 1
-    next_threshold = TARIFF_THRESHOLDS_KWH[-1] + 500.0
+    next_threshold: Optional[float] = None
+    lower_threshold = TARIFF_THRESHOLDS_KWH[-1]
     for index, threshold in enumerate(TARIFF_THRESHOLDS_KWH):
-        if current_kwh < threshold:
+        # EgyptERA residential bands include their upper bound (for example,
+        # 0–50 kWh is Tier 1 and Tier 2 starts above 50 kWh).
+        if safe_current_kwh <= threshold:
             current_tier = index + 1
             next_threshold = threshold
+            lower_threshold = 0.0 if index == 0 else TARIFF_THRESHOLDS_KWH[index - 1]
             break
 
+    if next_threshold is None:
+        return TariffStatus(
+            current_tier=current_tier,
+            next_tier=None,
+            status_label="Highest tariff tier",
+            detail="Usage is above the 1,000 kWh highest-tier threshold.",
+            level_percent=100.0,
+            remaining_kwh=0.0,
+            projected_to_exceed=False,
+        )
+
     next_tier = current_tier + 1
-    remaining_kwh = max(0.0, next_threshold - current_kwh)
-    level_percent = min(100.0, (current_kwh / next_threshold) * 100.0)
-    projected_to_exceed = projected_kwh >= next_threshold
+    remaining_kwh = max(0.0, next_threshold - safe_current_kwh)
+    tier_width = max(1.0, next_threshold - lower_threshold)
+    level_percent = min(
+        100.0, max(0.0, ((safe_current_kwh - lower_threshold) / tier_width) * 100.0)
+    )
+    projected_to_exceed = safe_projected_kwh > next_threshold
     return TariffStatus(
         current_tier=current_tier,
         next_tier=next_tier,
@@ -419,6 +739,24 @@ def calculate_tariff_status(current_kwh: float, projected_kwh: float) -> TariffS
         remaining_kwh=round(remaining_kwh, 1),
         projected_to_exceed=projected_to_exceed,
     )
+
+
+def calculate_residential_bill(kwh: float) -> float:
+    """April 2026 EgyptERA residential energy charge plus customer fee."""
+    usage = max(0.0, kwh)
+    if usage <= 50:
+        return round(usage * 0.68 + 1.0, 2)
+    if usage <= 100:
+        return round(50 * 0.68 + (usage - 50) * 0.78 + 2.0, 2)
+    if usage <= 200:
+        return round(usage * 0.95 + 6.0, 2)
+    if usage <= 350:
+        return round(200 * 0.95 + (usage - 200) * 1.55 + 11.0, 2)
+    if usage <= 650:
+        return round(200 * 0.95 + 150 * 1.55 + (usage - 350) * 1.95 + 15.0, 2)
+    if usage <= 1000:
+        return round(usage * 2.10 + 25.0, 2)
+    return round(usage * 2.58 + 40.0, 2)
 
 
 def remember_breakdown(household_id: str, breakdown: BreakdownResponse) -> None:
@@ -468,26 +806,48 @@ def simulate_usage(request: SimulateUsageRequest = Body(...)):
         household_id=household_id,
         duration_minutes=duration_minutes,
         interval_seconds=interval_seconds,
+        scenario_id=request.scenario_id,
+        custom_conditions=(
+            request.conditions
+            if request.mode in {"custom", "replay"} and request.conditions
+            else None
+        ),
+        profile=(request.profile if request.use_profile else None),
+        seed=request.seed,
     )
+    scenario_id = str(df.attrs.get("scenario_id", "custom"))
+    scenario_label = str(df.attrs.get("scenario_label", "Custom household day"))
+    latest_simulation_scenarios[household_id] = scenario_label
+    simulation_metadata = {
+        "seed": int(df.attrs.get("seed", 0)),
+        "configuration": dict(df.attrs.get("configuration", {})),
+        "events": list(df.attrs.get("events", [])),
+    }
+    latest_simulation_metadata[household_id] = simulation_metadata
     debug_checkpoint("simulation.generated", readings=len(df))
 
     readings = []
     for _, row in df.iterrows():
+        appliance_columns = [
+            column
+            for column in df.columns
+            if column not in {"timestamp", "house_id", "mains_power"}
+        ]
         readings.append(
             SimulatedReading(
                 timestamp=row["timestamp"],
                 mains_power=float(row["mains_power"]),
-                appliances={
-                    "fridge": float(row["fridge"]),
-                    "lighting": float(row["lighting"]),
-                    "ac_hvac": float(row.get("ac_hvac", 0.0)),
-                    "other": float(row["other"]),
-                },
+                appliances={column: float(row[column]) for column in appliance_columns},
             )
         )
 
     response = SimulateUsageResponse(
         household_id=household_id,
+        scenario_id=scenario_id,
+        scenario_label=scenario_label,
+        seed=simulation_metadata["seed"],
+        configuration=simulation_metadata["configuration"],
+        events=simulation_metadata["events"],
         timestamp_start=df.iloc[0]["timestamp"],
         timestamp_end=df.iloc[-1]["timestamp"],
         reading_count=len(readings),
@@ -495,6 +855,76 @@ def simulate_usage(request: SimulateUsageRequest = Body(...)):
     )
     debug_checkpoint("simulation.complete", readings=len(readings))
     return response
+
+
+def build_simulated_appliance_items(
+    readings: List[Dict[str, Any]],
+    total_kwh: float,
+    model_items: List[ApplianceBreakdownItem],
+) -> List[ApplianceBreakdownItem]:
+    """Use simulator ground truth for demo categories while retaining model scores."""
+    display_names = {
+        "fridge": "Refrigerator",
+        "lighting": "Lighting",
+        "ac_hvac": "Air conditioner",
+        "water_heater": "Water heater",
+        "washing_machine": "Washing machine",
+        "oven": "Oven",
+        "dishwasher": "Dishwasher",
+        "electronics": "Electronics",
+        "pool_pump": "Pool pump",
+        "other": "Other/unclassified",
+    }
+    model_by_category = {item.internal_category: item for item in model_items}
+    always_visible_categories = {
+        "fridge",
+        "lighting",
+        "ac_hvac",
+        "water_heater",
+        "other",
+    }
+    totals: Dict[str, float] = {}
+    for reading in readings:
+        appliances = reading.get("appliances")
+        if not isinstance(appliances, dict):
+            continue
+        for category, watts in appliances.items():
+            totals[category] = totals.get(category, 0.0) + max(0.0, float(watts)) / 60_000.0
+
+    items = []
+    attributed_kwh = 0.0
+    for category, consumption in totals.items():
+        if consumption <= 0.0001 and category not in always_visible_categories:
+            continue
+        attributed_kwh += consumption
+        model_item = model_by_category.get(category)
+        items.append(
+            ApplianceBreakdownItem(
+                category=display_names.get(category, category.replace("_", " ").title()),
+                internal_category=category,
+                display_name=display_names.get(category, category.replace("_", " ").title()),
+                consumption_kwh=round(consumption, 4),
+                share_percent=round(consumption / max(total_kwh, 0.0001) * 100.0, 2),
+                model_score=(model_item.model_score if model_item else 0.0),
+                model_score_label=(model_item.model_score_label if model_item else "N/A"),
+                not_yet_trained=(model_item.not_yet_trained if model_item else True),
+            )
+        )
+    unattributed = max(0.0, total_kwh - attributed_kwh)
+    if unattributed > 0.0001:
+        items.append(
+            ApplianceBreakdownItem(
+                category="Unattributed / baseline",
+                internal_category="unattributed",
+                display_name="Unattributed / baseline",
+                consumption_kwh=round(unattributed, 4),
+                share_percent=round(unattributed / max(total_kwh, 0.0001) * 100.0, 2),
+                model_score=1.0,
+                model_score_label="High",
+                not_yet_trained=False,
+            )
+        )
+    return sorted(items, key=lambda item: item.consumption_kwh, reverse=True)
 
 
 @app.post("/get-breakdown", response_model=BreakdownResponse)
@@ -541,13 +971,20 @@ def get_breakdown(request: BreakdownRequest):
         raise HTTPException(status_code=400, detail=str(err))
 
     items = [ApplianceBreakdownItem(**item) for item in res["appliance_breakdown"]]
+    has_simulated_ground_truth = any(
+        isinstance(reading.get("appliances"), dict) for reading in request.readings
+    )
+    if has_simulated_ground_truth:
+        items = build_simulated_appliance_items(
+            request.readings, res["total_consumption_kwh"], items
+        )
 
     response = BreakdownResponse(
         timestamp=res["timestamp"],
         duration_minutes=res["duration_minutes"],
         total_consumption_kwh=res["total_consumption_kwh"],
         appliance_breakdown=items,
-        simulated=False,
+        simulated=has_simulated_ground_truth,
     )
     remember_breakdown(request.household_id or "high-ac-home", response)
     return response
@@ -556,9 +993,35 @@ def get_breakdown(request: BreakdownRequest):
 def create_demo_breakdown(household_id: str) -> BreakdownResponse:
     """Create an initial backend measurement window when no reading was submitted yet."""
     debug_checkpoint("breakdown.demo.start", household_id=household_id)
-    df_sim = generate_synthetic_household(household_id=household_id, duration_minutes=20)
+    df_sim = generate_synthetic_household(
+        household_id=household_id, duration_minutes=1440
+    )
+    latest_simulation_scenarios[household_id] = str(
+        df_sim.attrs.get("scenario_label", "Representative household day")
+    )
+    latest_simulation_metadata[household_id] = {
+        "seed": int(df_sim.attrs.get("seed", 0)),
+        "configuration": dict(df_sim.attrs.get("configuration", {})),
+        "events": list(df_sim.attrs.get("events", [])),
+    }
     res = predict_disaggregation(df_sim)
     items = [ApplianceBreakdownItem(**item) for item in res["appliance_breakdown"]]
+    appliance_columns = [
+        column
+        for column in df_sim.columns
+        if column not in {"timestamp", "house_id", "mains_power"}
+    ]
+    simulated_readings = [
+        {
+            "appliances": {
+                column: float(row[column]) for column in appliance_columns
+            }
+        }
+        for _, row in df_sim.iterrows()
+    ]
+    items = build_simulated_appliance_items(
+        simulated_readings, res["total_consumption_kwh"], items
+    )
 
     return BreakdownResponse(
         timestamp=res["timestamp"],
@@ -627,9 +1090,9 @@ def get_dashboard(household_id: str):
     current_kwh = projection["current_kwh"]
     projected_kwh = projection["projected_kwh"]
     previous_kwh = previous_projected_kwh.get(household_id, projected_kwh)
-    current_cost = round(current_kwh * ESTIMATED_EGP_PER_KWH, 1)
-    predicted_bill = round(projected_kwh * ESTIMATED_EGP_PER_KWH, 1)
-    previous_bill = round(previous_kwh * ESTIMATED_EGP_PER_KWH, 1)
+    current_cost = round(calculate_residential_bill(current_kwh), 1)
+    predicted_bill = round(calculate_residential_bill(projected_kwh), 1)
+    previous_bill = round(calculate_residential_bill(previous_kwh), 1)
     change_percent = (
         round(((projected_kwh - previous_kwh) / previous_kwh) * 100.0, 1)
         if previous_kwh > 0
@@ -677,6 +1140,16 @@ def get_dashboard(household_id: str):
         tariff_status=tariff_status,
         appliance_breakdown=scaled_appliances,
         recommendation=rec_data,
+        simulation_scenario=latest_simulation_scenarios.get(
+            household_id, "Representative household day"
+        ),
+        simulation_seed=latest_simulation_metadata.get(household_id, {}).get("seed"),
+        simulation_configuration=latest_simulation_metadata.get(household_id, {}).get(
+            "configuration", {}
+        ),
+        simulation_events=latest_simulation_metadata.get(household_id, {}).get(
+            "events", []
+        ),
         simulated=breakdown_data.simulated,
         updated_at=now.isoformat() + "Z",
     )
@@ -693,16 +1166,7 @@ def get_usage_history(household_id: str, period: str = Query("7d")):
     """
     Household history derived from the same backend breakdown as the dashboard.
     """
-    selected_period, granularity, date_range_label, points = (
-        build_household_history(household_id, period)
-    )
-
-    return UsageHistoryResponse(
-        period=selected_period,
-        granularity=granularity,
-        date_range_label=date_range_label,
-        points=points,
-    )
+    return build_household_history(household_id, period)
 
 
 def call_gemini(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -841,19 +1305,63 @@ Return ONLY valid JSON, no markdown, no preamble, in this exact schema:
 @app.post("/v1/smart-tips/chat", response_model=TipChatResponse)
 @limiter.limit("10/minute")
 def chat_about_tip(request: Request, payload: TipChatRequest):
-    household = payload.household_data
     tip = payload.tip
-    system_context = f"""You are an energy efficiency advisor discussing ONE specific tip with a homeowner.
-
-Household context:
-- Home type: {household.home_type}
-- Avg daily usage: {household.avg_kwh} kWh
-
-The tip being discussed:
+    full_usage_data_json = json.dumps(
+        payload.full_usage_data, ensure_ascii=False, indent=2
+    )
+    household = payload.full_usage_data.get("household", {})
+    user_name = household.get("userName") or "the homeowner"
+    displayed_name = household.get("userName") or "not provided"
+    house_type = household.get("homeType") or "not provided"
+    occupants = household.get("occupants") or "not provided"
+    current_topic = (
+        f"""The tip you're currently discussing:
 Title: {tip.title}
 Summary: {tip.summary}
+Category: {tip.category}"""
+        if tip
+        else """There isn't one specific tip selected for this conversation. Discuss this household's energy usage, forecasts, appliances, anomalies, tariffs, efficiency, and possible savings."""
+    )
+    conversation_focus = (
+        "about one of their personalized energy tips"
+        if tip
+        else "about their household energy use"
+    )
+    system_context = f"""You're a friendly, casual energy advisor chatting with {user_name} {conversation_focus}. Talk like a knowledgeable friend, not a formal report — use contractions, keep it warm and human.
 
-Answer the user's follow-up questions about this tip specifically — implementation steps, cost estimates, why it applies to their home, alternatives if this doesn't work for them. Stay focused on this tip unless the user clearly asks about something else. Keep responses conversational and concise (2-4 sentences unless they ask for detail)."""
+Here's what you know about this household:
+- Name: {displayed_name}
+- Home type: {house_type}
+- Occupants: {occupants}
+- Full usage data: {full_usage_data_json}
+
+{current_topic}
+
+How to behave:
+- Address them by name occasionally if you have it, don't force it into every message
+- Reference their specific situation (home type, occupants, usage patterns) naturally when it makes advice more concrete
+- You have their full usage data, so bring in relevant details beyond just this one tip if it helps answer their question
+- Be proactive: encourage them to actually take action on the tip, suggest concrete next steps, offer a walkthrough
+- STAY ON TOPIC. Only discuss this tip, this household's energy usage, and general energy/efficiency questions. If the user asks something unrelated to energy, their home, or this tip, do NOT answer it — briefly redirect back to the tip instead. Do not engage with the off-topic content at all, even briefly.
+- KEEP ANSWERS SHORT. Default to 1-3 sentences. Only give a longer, more detailed answer if the user explicitly asks for more detail, a full walkthrough, or a step-by-step breakdown.
+- Don't repeat their question back before answering
+
+Examples of how to redirect off-topic questions:
+User: 'what's the weather like today'
+You: 'Not something I can help with, but speaking of weather — hot days are probably why we're seeing those afternoon AC spikes. Want tips on that?'
+
+User: 'can you help me write an essay for school'
+You: 'That's outside what I can help with here — I'm just your energy advisor! Anything about your usage or this tip I can help with instead?'
+
+User: 'what do you think about politics'
+You: 'I'll stay in my lane on that one 😄 Got any questions about your energy setup though?'
+
+Examples of short vs long answers:
+User: 'why does this tip save energy'
+You (short, correct): 'Your usage data shows most of your consumption is off-peak-hour AC running non-stop. This tip cuts that by scheduling it around when you're actually home.'
+
+User: 'can you give me a full step by step on how to set this up'
+You (longer, correct — they explicitly asked for a walkthrough): [give the detailed steps]"""
     contents = [
         {"role": message.role, "parts": [{"text": message.text}]}
         for message in payload.conversation_history
@@ -863,7 +1371,7 @@ Answer the user's follow-up questions about this tip specifically — implementa
         {
             "systemInstruction": {"parts": [{"text": system_context}]},
             "contents": contents,
-            "generationConfig": {"temperature": 0.7},
+            "generationConfig": {"temperature": 0.8},
         }
     )
     return TipChatResponse(message=gemini_text(response))

@@ -22,7 +22,7 @@ import {
 
 import { MiqyasBrand } from '../components/MiqyasBrand';
 import { useMobileBrowserBottomInset } from '../hooks/useMobileBrowserBottomInset';
-import type { DashboardService } from '../services';
+import type { DashboardService, HistoryService } from '../services';
 import {
   generateSmartTips,
   sendTipChatMessage,
@@ -30,6 +30,7 @@ import {
 import { useHouseholdProfile } from '../state/HouseholdProfileContext';
 import { colors, radii, shadows, spacing, typography } from '../theme';
 import type {
+  FullUsageData,
   HouseholdTipData,
   SmartTip,
   SmartTipCategory,
@@ -87,17 +88,24 @@ async function clearHouseholdChats(householdId: string) {
   }
 }
 
-export function SmartTipsScreen({ service }: { service: DashboardService }) {
+export function SmartTipsScreen({
+  historyService,
+  service,
+}: {
+  historyService: HistoryService;
+  service: DashboardService;
+}) {
   const { dataRevision, selectedHouseholdId, selectedProfile } =
     useHouseholdProfile();
   const [tips, setTips] = useState<SmartTip[]>([]);
   const [generationId, setGenerationId] = useState('');
-  const [householdData, setHouseholdData] = useState<HouseholdTipData | null>(
+  const [fullUsageData, setFullUsageData] = useState<FullUsageData | null>(
     null,
   );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTip, setSelectedTip] = useState<SmartTip | null>(null);
+  const [generalChatOpen, setGeneralChatOpen] = useState(false);
 
   const loadTips = useCallback(
     async (forceRefresh = false) => {
@@ -108,9 +116,38 @@ export function SmartTipsScreen({ service }: { service: DashboardService }) {
           setTips([]);
           setGenerationId('');
           setSelectedTip(null);
+          setGeneralChatOpen(false);
           await clearHouseholdChats(selectedHouseholdId);
         }
-        const dashboard = await service.getDashboard(selectedHouseholdId);
+        const [dashboard, recentDaily, recentWeekly, olderMonthly] =
+          await Promise.all([
+            service.getDashboard(selectedHouseholdId),
+            historyService
+              .getHistory(selectedHouseholdId, '7d')
+              .catch(() => null),
+            historyService
+              .getHistory(selectedHouseholdId, '4w')
+              .catch(() => null),
+            historyService
+              .getHistory(selectedHouseholdId, '6m')
+              .catch(() => null),
+          ]);
+        if (dashboard.householdId !== selectedHouseholdId) {
+          throw new Error(
+            'The backend returned data for a different household. Please retry.',
+          );
+        }
+        const historyResponses = [recentDaily, recentWeekly, olderMonthly];
+        if (
+          historyResponses.some(
+            (history) =>
+              history !== null && history.householdId !== selectedHouseholdId,
+          )
+        ) {
+          throw new Error(
+            'The backend returned usage history for a different household. Please retry.',
+          );
+        }
         const elapsedDays = Math.max(new Date().getDate(), 1);
         const input: HouseholdTipData = {
           householdId: selectedHouseholdId,
@@ -119,10 +156,34 @@ export function SmartTipsScreen({ service }: { service: DashboardService }) {
           avgKwh: Number(
             (dashboard.currentConsumptionKwh / elapsedDays).toFixed(1),
           ),
-          anomaliesSummary: `${dashboard.priorityInsight.title}: ${dashboard.priorityInsight.message}`,
-          peakHours: 'Not available from the current dataset',
+          anomaliesSummary: `Active simulation: ${dashboard.simulationScenario}. ${dashboard.priorityInsight.title}: ${dashboard.priorityInsight.message}`,
+          peakHours:
+            dashboard.simulationEvents.length > 0
+              ? dashboard.simulationEvents
+                  .map((event) => `${event.time} ${event.title}`)
+                  .join('; ')
+              : 'Not available from the current dataset',
         };
-        setHouseholdData(input);
+        setFullUsageData({
+          datasetMetadata: {
+            selectedHouseholdId,
+            simulationRevision: dataRevision,
+            dashboardUpdatedAt: dashboard.updatedAt,
+            capturedAt: new Date().toISOString(),
+          },
+          household: {
+            id: selectedHouseholdId,
+            name: selectedProfile.householdName,
+            userName: selectedProfile.userName,
+            homeType: selectedProfile.homeType,
+            location: selectedProfile.location,
+            occupants: selectedProfile.residents,
+          },
+          dashboard,
+          history: { recentDaily, recentWeekly, olderMonthly },
+          historyPolicy:
+            'Full daily detail for the latest 7 days, weekly summaries for 4 weeks, and monthly summaries for the older 6-month view.',
+        });
         const signature = inputSignature(input);
 
         if (!forceRefresh) {
@@ -175,9 +236,14 @@ export function SmartTipsScreen({ service }: { service: DashboardService }) {
       }
     },
     [
+      dataRevision,
       selectedHouseholdId,
+      selectedProfile.householdName,
       selectedProfile.homeType,
+      selectedProfile.location,
       selectedProfile.residents,
+      selectedProfile.userName,
+      historyService,
       service,
     ],
   );
@@ -246,6 +312,30 @@ export function SmartTipsScreen({ service }: { service: DashboardService }) {
           </View>
         ) : (
           <View style={styles.tipList}>
+            <Pressable
+              accessibilityHint="Opens a general conversation about this household's energy use"
+              accessibilityRole="button"
+              onPress={() => setGeneralChatOpen(true)}
+              style={({ pressed }) => [
+                styles.startChatCard,
+                pressed && styles.pressed,
+              ]}
+            >
+              <View style={styles.chatIconBox}>
+                <Ionicons
+                  color={colors.surface}
+                  name="chatbubbles-outline"
+                  size={25}
+                />
+              </View>
+              <View style={styles.tipBody}>
+                <Text style={styles.startChatTitle}>Start a Chat</Text>
+                <Text style={styles.startChatText}>
+                  Ask about your home’s usage, costs, appliances, or savings.
+                </Text>
+              </View>
+              <Ionicons color={colors.surface} name="arrow-forward" size={21} />
+            </Pressable>
             {tips.map((tip, index) => (
               <Pressable
                 accessibilityHint="Opens a conversation about this recommendation"
@@ -296,14 +386,24 @@ export function SmartTipsScreen({ service }: { service: DashboardService }) {
         )}
       </ScrollView>
 
-      {selectedTip && householdData ? (
+      {selectedTip && fullUsageData ? (
         <TipChatModal
+          fullUsageData={fullUsageData}
           generationId={generationId}
-          householdData={householdData}
           householdId={selectedHouseholdId}
           key={`${generationId}:${selectedTip.id}`}
           onClose={() => setSelectedTip(null)}
           tip={selectedTip}
+        />
+      ) : null}
+      {generalChatOpen && fullUsageData ? (
+        <TipChatModal
+          fullUsageData={fullUsageData}
+          generationId={generationId}
+          householdId={selectedHouseholdId}
+          key={`${generationId}:general`}
+          onClose={() => setGeneralChatOpen(false)}
+          tip={null}
         />
       ) : null}
     </SafeAreaView>
@@ -311,17 +411,17 @@ export function SmartTipsScreen({ service }: { service: DashboardService }) {
 }
 
 function TipChatModal({
+  fullUsageData,
   generationId,
-  householdData,
   householdId,
   onClose,
   tip,
 }: {
+  fullUsageData: FullUsageData;
   generationId: string;
-  householdData: HouseholdTipData;
   householdId: string;
   onClose: () => void;
-  tip: SmartTip;
+  tip: SmartTip | null;
 }) {
   const [messages, setMessages] = useState<TipChatMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -337,8 +437,8 @@ function TipChatModal({
     spacing.sm,
   );
   const storageKey = useMemo(
-    () => chatKey(householdId, generationId, tip.id),
-    [generationId, householdId, tip.id],
+    () => chatKey(householdId, generationId, tip?.id ?? 'general'),
+    [generationId, householdId, tip?.id],
   );
 
   useEffect(() => {
@@ -365,7 +465,7 @@ function TipChatModal({
       await AsyncStorage.setItem(storageKey, JSON.stringify(history));
       const reply = await sendTipChatMessage(
         tip,
-        householdData,
+        fullUsageData,
         messages,
         text,
       );
@@ -417,9 +517,13 @@ function TipChatModal({
               </Pressable>
               <View style={styles.modalHeading}>
                 <Text numberOfLines={1} style={styles.modalTitle}>
-                  {tip.title}
+                  {tip?.title ?? 'Miqyas Energy Advisor'}
                 </Text>
-                <Text style={styles.modalSubtitle}>Ask about this tip</Text>
+                <Text style={styles.modalSubtitle}>
+                  {tip
+                    ? 'Ask about this tip'
+                    : 'Ask about your home energy use'}
+                </Text>
               </View>
             </View>
           </View>
@@ -428,15 +532,18 @@ function TipChatModal({
             data={messages}
             keyExtractor={(item) => item.id}
             ListHeaderComponent={
-              <View style={styles.contextCard}>
-                <Text style={styles.contextSummary}>{tip.summary}</Text>
-                <Text style={styles.savings}>{tip.estimatedSavings}</Text>
-              </View>
+              tip ? (
+                <View style={styles.contextCard}>
+                  <Text style={styles.contextSummary}>{tip.summary}</Text>
+                  <Text style={styles.savings}>{tip.estimatedSavings}</Text>
+                </View>
+              ) : null
             }
             ListEmptyComponent={
               <Text style={styles.emptyChat}>
-                Ask how to apply this tip, what it may cost, or what
-                alternatives fit your home.
+                {tip
+                  ? 'Ask how to apply this tip, what it may cost, or what alternatives fit your home.'
+                  : 'Ask anything about this home’s energy use, appliances, bill forecast, tariff, or ways to save.'}
               </Text>
             }
             renderItem={({ item }) => (
@@ -559,6 +666,29 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { ...typography.label, color: colors.surface },
   tipList: { gap: spacing.md },
+  startChatCard: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radii.lg,
+    flexDirection: 'row',
+    gap: spacing.md,
+    padding: spacing.lg,
+    ...shadows.card,
+  },
+  chatIconBox: {
+    alignItems: 'center',
+    backgroundColor: colors.primaryDark,
+    borderRadius: radii.md,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  startChatTitle: { ...typography.heading, color: colors.surface },
+  startChatText: {
+    ...typography.body,
+    color: colors.tealSoft,
+    marginTop: spacing.xs,
+  },
   tipCard: {
     alignItems: 'center',
     backgroundColor: colors.surface,

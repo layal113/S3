@@ -6,6 +6,10 @@ import type {
   HouseholdId,
   HouseholdOption,
 } from '../types/dashboard';
+import type {
+  SimulationOptions,
+  SimulationRunResult,
+} from '../types/simulation';
 import type { DashboardService } from './DashboardService';
 
 export class ApiDashboardService implements DashboardService {
@@ -41,9 +45,16 @@ export class ApiDashboardService implements DashboardService {
 
   async triggerSimulation(
     householdId: HouseholdId = 'high-ac-home',
-  ): Promise<void> {
+    options: SimulationOptions = { mode: 'surprise', useProfile: false },
+  ): Promise<SimulationRunResult> {
     const simUrl = `${env.apiBaseUrl}/simulate-usage`;
     try {
+      const before = await this.getDashboard(householdId);
+      if (before.householdId !== householdId) {
+        throw new Error(
+          'The backend returned a different household. Please retry.',
+        );
+      }
       console.info('[ApiDashboardService] Simulation started', {
         householdId,
         url: simUrl,
@@ -53,9 +64,10 @@ export class ApiDashboardService implements DashboardService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          household_id: householdId,
-          duration_minutes: 30,
-          interval_seconds: 60,
+          householdId,
+          durationMinutes: 1440,
+          intervalSeconds: 60,
+          ...options,
         }),
       });
       if (!simRes.ok) {
@@ -65,6 +77,7 @@ export class ApiDashboardService implements DashboardService {
       console.info('[ApiDashboardService] Signal generated', {
         householdId,
         readingCount: simData.readingCount ?? simData.readings?.length,
+        scenario: simData.scenarioLabel,
       });
 
       // 2. Chained call: feed simulated readings directly into /get-breakdown
@@ -89,6 +102,35 @@ export class ApiDashboardService implements DashboardService {
         householdId,
         categoryCount: breakdownData.applianceBreakdown?.length ?? 0,
       });
+      const after = await this.getDashboard(householdId);
+      if (after.householdId !== householdId) {
+        throw new Error(
+          'The backend returned a different household. Please retry.',
+        );
+      }
+      const configuration = simData.configuration ?? {};
+      return {
+        householdId,
+        scenarioId: simData.scenarioId,
+        scenarioLabel: simData.scenarioLabel,
+        seed: simData.seed,
+        configuration,
+        events: simData.events ?? [],
+        before,
+        after,
+        replayOptions: {
+          ...options,
+          mode: configuration.mode === 'custom' ? 'replay' : 'preset',
+          scenarioId:
+            configuration.base_scenario_id ??
+            configuration.baseScenarioId ??
+            configuration.scenario_id ??
+            configuration.scenarioId ??
+            simData.scenarioId,
+          seed: simData.seed,
+          conditions: options.conditions,
+        },
+      };
     } catch (error) {
       console.warn(`[ApiDashboardService] Simulation flow error:`, error);
       throw error;

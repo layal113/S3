@@ -17,7 +17,11 @@ export function DashboardSummary({ data }: { data: DashboardData }) {
         icon="speedometer-outline"
         accent="teal"
         label="Current tariff"
-        qualifier={`${formatNumber(data.tariffStatus.remainingKwh)} kWh remaining until Tier ${data.tariffStatus.nextTier}`}
+        qualifier={
+          data.tariffStatus.nextTier === null
+            ? 'Highest residential tariff tier'
+            : `${formatNumber(data.tariffStatus.remainingKwh)} kWh remaining until Tier ${data.tariffStatus.nextTier}`
+        }
         value={`Tier ${data.tariffStatus.currentTier}`}
         meterPercent={data.tariffStatus.levelPercent}
       />

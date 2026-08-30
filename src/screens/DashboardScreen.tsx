@@ -13,12 +13,20 @@ import {
   PriorityInsightCard,
   RecommendationCard,
 } from '../components';
+import {
+  SimulationResultSheet,
+  SimulationSetupSheet,
+} from '../components/SimulationFlow';
 import { useDashboard } from '../hooks/useDashboard';
 import type { DashboardService } from '../services';
 import { ApiDashboardService } from '../services/ApiDashboardService';
 import { useHouseholdProfile } from '../state/HouseholdProfileContext';
 import { colors, radii, spacing, typography } from '../theme';
 import type { HistoryAppliance } from '../types/history';
+import type {
+  SimulationOptions,
+  SimulationRunResult,
+} from '../types/simulation';
 
 export function DashboardScreen({
   service,
@@ -32,6 +40,11 @@ export function DashboardScreen({
   onProfilePress: () => void;
 }) {
   const [isSimulating, setIsSimulating] = useState(false);
+  const [simulationSetupOpen, setSimulationSetupOpen] = useState(false);
+  const [simulationResult, setSimulationResult] =
+    useState<SimulationRunResult | null>(null);
+  const [simulationResultOpen, setSimulationResultOpen] = useState(false);
+  const [simulationError, setSimulationError] = useState<string | null>(null);
   const {
     profiles,
     selectedHouseholdId,
@@ -48,21 +61,49 @@ export function DashboardScreen({
     selectedHouseholdId,
   );
 
-  const handleRunSimulation = async () => {
+  const handleRunSimulation = async (
+    options: SimulationOptions,
+    comparisonBefore?: SimulationRunResult['before'],
+  ) => {
     if (service instanceof ApiDashboardService) {
       try {
+        setSimulationError(null);
         setIsSimulating(true);
-        await service.triggerSimulation(selectedHouseholdId);
+        const result = await service.triggerSimulation(
+          selectedHouseholdId,
+          options,
+        );
+        const comparableResult = comparisonBefore
+          ? { ...result, before: comparisonBefore }
+          : result;
+        setSimulationResult(comparableResult);
+        setSimulationSetupOpen(false);
+        setSimulationResultOpen(true);
         notifyHouseholdDataChanged(selectedHouseholdId);
         await reload();
       } catch (err) {
         console.warn('Simulation trigger failed:', err);
+        setSimulationSetupOpen(false);
+        setSimulationError(
+          err instanceof Error
+            ? err.message
+            : 'The simulation could not be completed. Please retry.',
+        );
       } finally {
         setIsSimulating(false);
       }
     } else {
       await reload();
+      setSimulationSetupOpen(false);
     }
+  };
+
+  const handleReplay = async () => {
+    if (!simulationResult) return;
+    await handleRunSimulation(
+      simulationResult.replayOptions,
+      simulationResult.before,
+    );
   };
 
   const displayedData = data
@@ -86,15 +127,30 @@ export function DashboardScreen({
 
         <Pressable
           style={[styles.simButton, isSimulating && styles.simButtonDisabled]}
-          onPress={handleRunSimulation}
+          onPress={() => {
+            setSimulationError(null);
+            setSimulationSetupOpen(true);
+          }}
           disabled={isSimulating}
         >
+          <Ionicons color={colors.surface} name="flask-outline" size={19} />
           <Text style={styles.simButtonText}>
             {isSimulating
-              ? '⏳ Generating Signal & Running ML...'
-              : ' Run Household Signal Simulation'}
+              ? 'Generating household scenario…'
+              : 'Simulate household data'}
           </Text>
         </Pressable>
+
+        {simulationError ? (
+          <View accessibilityRole="alert" style={styles.simulationError}>
+            <Ionicons
+              color={colors.danger}
+              name="alert-circle-outline"
+              size={20}
+            />
+            <Text style={styles.simulationErrorText}>{simulationError}</Text>
+          </View>
+        ) : null}
 
         {isLoading || !displayedData ? (
           error ? (
@@ -114,6 +170,7 @@ export function DashboardScreen({
               residents={selectedProfile.residents}
               billingPeriodLabel={displayedData.billingPeriodLabel}
               updatedAt={displayedData.updatedAt}
+              simulationScenario={displayedData.simulationScenario}
               onProfilePress={onProfilePress}
             />
             <DashboardSummary data={displayedData} />
@@ -142,6 +199,21 @@ export function DashboardScreen({
           </View>
         </View>
       </ScrollView>
+      <SimulationSetupSheet
+        householdId={selectedHouseholdId}
+        isRunning={isSimulating}
+        onClose={() => setSimulationSetupOpen(false)}
+        onRun={(options) => void handleRunSimulation(options)}
+        profile={selectedProfile}
+        visible={simulationSetupOpen}
+      />
+      <SimulationResultSheet
+        isReplaying={isSimulating}
+        onClose={() => setSimulationResultOpen(false)}
+        onReplay={() => void handleReplay()}
+        result={simulationResult}
+        visible={simulationResultOpen}
+      />
     </SafeAreaView>
   );
 }
@@ -151,6 +223,8 @@ const styles = StyleSheet.create({
   content: { gap: spacing.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
   stateContainer: { minHeight: 420 },
   simButton: {
+    flexDirection: 'row',
+    gap: spacing.sm,
     backgroundColor: colors.primary,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
@@ -165,6 +239,19 @@ const styles = StyleSheet.create({
   simButtonText: {
     ...typography.label,
     color: colors.surface,
+  },
+  simulationError: {
+    alignItems: 'center',
+    backgroundColor: '#FDECEA',
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  simulationErrorText: {
+    ...typography.body,
+    color: colors.danger,
+    flex: 1,
   },
   hotline: {
     alignItems: 'center',

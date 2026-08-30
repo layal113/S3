@@ -14,6 +14,12 @@ export class ApiHistoryService implements HistoryService {
     if (!response.ok) {
       throw new Error(`History HTTP status ${response.status}`);
     }
-    return response.json() as Promise<UsageHistoryData>;
+    const data = (await response.json()) as UsageHistoryData;
+    if (data.householdId !== householdId) {
+      throw new Error(
+        'The backend returned history for a different household.',
+      );
+    }
+    return data;
   }
 }

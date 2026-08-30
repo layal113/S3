@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from api.main import app
+from api.main import app, calculate_residential_bill, calculate_tariff_status
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -81,9 +81,46 @@ def test_dashboard_endpoint():
     assert "recommendation" in data
 
 
+def test_insights_reconcile_with_dashboard_and_appliance_rows():
+    dashboard = client.get("/v1/households/family-villa/dashboard").json()
+
+    for period in ("7d", "4w", "6m"):
+        response = client.get(
+            "/v1/households/family-villa/usage/history",
+            params={"period": period},
+        )
+        assert response.status_code == 200
+        history = response.json()
+        assert history["householdId"] == dashboard["householdId"]
+        assert history["billingCycleKwh"] == dashboard["currentConsumptionKwh"]
+        assert history["billingCycleCostEgp"] == dashboard["currentEstimatedCostEgp"]
+        assert history["projectedMonthlyKwh"] == dashboard["projectedMonthlyKwh"]
+        assert history["projectedMonthlyCostEgp"] == dashboard["predictedMonthEndBillEgp"]
+        for point in history["points"]:
+            appliance_kwh = sum(item["kWh"] for item in point["appliances"].values())
+            appliance_cost = sum(
+                item["costEGP"] for item in point["appliances"].values()
+            )
+            assert abs(appliance_kwh - point["totalKWh"]) < 0.02
+            assert abs(appliance_cost - point["estimatedCostEGP"]) < 0.02
+
+
 def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
     assert data["models_loaded"] is True
+
+
+def test_tariff_tiers_use_inclusive_upper_boundaries():
+    usages = [50, 51, 100, 101, 200, 201, 350, 351, 650, 651, 1000, 1001]
+    expected = [1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7]
+
+    assert [calculate_tariff_status(value, value).current_tier for value in usages] == expected
+
+
+def test_residential_bill_uses_tiered_prices_and_highest_band():
+    assert calculate_residential_bill(50) == 35.0
+    assert calculate_residential_bill(650) == 1022.5
+    assert calculate_residential_bill(1001) == 2622.58
