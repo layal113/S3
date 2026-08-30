@@ -35,6 +35,6 @@ services:
       - key: NODE_VERSION
         value: 22.13.1
       - key: EXPO_PUBLIC_API_URL
-        value: https://onrender.com
+        value: https://miqyas-backend.onrender.com
       - key: EXPO_PUBLIC_API_BASE_URL
-        value: https://onrender.com
+        value: https://miqyas-backend.onrender.com

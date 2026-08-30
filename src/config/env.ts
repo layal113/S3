@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-const PRODUCTION_API_URL = 'https://onrender.com';
+const PRODUCTION_API_URL = 'https://miqyas-backend.onrender.com';
 
 function cleanUrl(url: string): string {
   return url.replace(/\/+$/, '');

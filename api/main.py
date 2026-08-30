@@ -108,7 +108,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configure CORS for deployed Render backend, Render Static Site frontend, and local dev environments
 default_origins = [
+    "https://miqyas-backend.onrender.com",
+    "https://s3-1-4y34.onrender.com",
     "https://s3-d0wz.onrender.com",
+    "https://s3-frontend.onrender.com",
+    "https://miqyas.onrender.com",
     "http://localhost:8081",
     "http://localhost:19006",
     "http://localhost:3000",
