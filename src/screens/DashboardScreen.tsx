@@ -13,6 +13,7 @@ import {
   PriorityInsightCard,
   RecommendationCard,
 } from '../components';
+import { Reveal } from '../components/Reveal';
 import {
   SimulationResultSheet,
   SimulationSetupSheet,
@@ -21,12 +22,13 @@ import { useDashboard } from '../hooks/useDashboard';
 import type { DashboardService } from '../services';
 import { ApiDashboardService } from '../services/ApiDashboardService';
 import { useHouseholdProfile } from '../state/HouseholdProfileContext';
-import { colors, radii, spacing, typography } from '../theme';
+import { colors, layout, radii, spacing, typography } from '../theme';
 import type { HistoryAppliance } from '../types/history';
 import type {
   SimulationOptions,
   SimulationRunResult,
 } from '../types/simulation';
+import { feedback } from '../utils/feedback';
 
 export function DashboardScreen({
   service,
@@ -81,9 +83,11 @@ export function DashboardScreen({
         setSimulationResultOpen(true);
         notifyHouseholdDataChanged(selectedHouseholdId);
         await reload();
+        void feedback.success();
       } catch (err) {
         console.warn('Simulation trigger failed:', err);
         setSimulationSetupOpen(false);
+        void feedback.warning();
         setSimulationError(
           err instanceof Error
             ? err.message
@@ -126,7 +130,11 @@ export function DashboardScreen({
         />
 
         <Pressable
-          style={[styles.simButton, isSimulating && styles.simButtonDisabled]}
+          style={({ pressed }) => [
+            styles.simButton,
+            isSimulating && styles.simButtonDisabled,
+            pressed && !isSimulating && styles.simButtonPressed,
+          ]}
           onPress={() => {
             setSimulationError(null);
             setSimulationSetupOpen(true);
@@ -161,29 +169,42 @@ export function DashboardScreen({
             </View>
           )
         ) : (
-          <>
-            <HomeHeader
-              userName={selectedProfile.userName}
-              householdName={displayedData.householdName}
-              location={selectedProfile.location}
-              homeType={selectedProfile.homeType}
-              residents={selectedProfile.residents}
-              billingPeriodLabel={displayedData.billingPeriodLabel}
-              updatedAt={displayedData.updatedAt}
-              simulationScenario={displayedData.simulationScenario}
-              onProfilePress={onProfilePress}
-            />
-            <DashboardSummary data={displayedData} />
-            <PriorityInsightCard insight={displayedData.priorityInsight} />
-            <ApplianceBreakdown
-              appliances={displayedData.applianceBreakdown}
-              onAppliancePress={onAppliancePress}
-            />
-            <RecommendationCard
-              recommendation={displayedData.recommendation}
-              onPress={onRecommendationPress}
-            />
-          </>
+          <Reveal
+            key={`${selectedHouseholdId}:${displayedData.updatedAt}`}
+            style={styles.dashboardContent}
+          >
+            <Reveal>
+              <HomeHeader
+                userName={selectedProfile.userName}
+                householdName={displayedData.householdName}
+                location={selectedProfile.location}
+                homeType={selectedProfile.homeType}
+                residents={selectedProfile.residents}
+                billingPeriodLabel={displayedData.billingPeriodLabel}
+                updatedAt={displayedData.updatedAt}
+                simulationScenario={displayedData.simulationScenario}
+                onProfilePress={onProfilePress}
+              />
+            </Reveal>
+            <Reveal delay={45}>
+              <DashboardSummary data={displayedData} />
+            </Reveal>
+            <Reveal delay={90}>
+              <PriorityInsightCard insight={displayedData.priorityInsight} />
+            </Reveal>
+            <Reveal delay={135}>
+              <ApplianceBreakdown
+                appliances={displayedData.applianceBreakdown}
+                onAppliancePress={onAppliancePress}
+              />
+            </Reveal>
+            <Reveal delay={180}>
+              <RecommendationCard
+                recommendation={displayedData.recommendation}
+                onPress={onRecommendationPress}
+              />
+            </Reveal>
+          </Reveal>
         )}
         <View
           accessible
@@ -220,7 +241,13 @@ export function DashboardScreen({
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.background, flex: 1 },
-  content: { gap: spacing.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: {
+    ...layout.screenContent,
+    gap: spacing.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+  },
+  dashboardContent: { gap: spacing.xl },
   stateContainer: { minHeight: 420 },
   simButton: {
     flexDirection: 'row',
@@ -236,13 +263,14 @@ const styles = StyleSheet.create({
   simButtonDisabled: {
     opacity: 0.6,
   },
+  simButtonPressed: { opacity: 0.88, transform: [{ scale: 0.985 }] },
   simButtonText: {
     ...typography.label,
     color: colors.surface,
   },
   simulationError: {
     alignItems: 'center',
-    backgroundColor: '#FDECEA',
+    backgroundColor: colors.dangerSoft,
     borderRadius: radii.md,
     flexDirection: 'row',
     gap: spacing.sm,

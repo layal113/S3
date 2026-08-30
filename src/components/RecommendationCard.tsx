@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, radii, shadows, spacing, typography } from '../theme';
+import { borders, colors, radii, shadows, spacing, typography } from '../theme';
 import type { Recommendation } from '../types/dashboard';
 import { formatNumber } from '../utils/format';
 
@@ -41,13 +41,14 @@ export function RecommendationCard({
 
 const styles = StyleSheet.create({
   card: {
+    ...borders.card,
     ...shadows.card,
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     gap: spacing.md,
     padding: spacing.lg,
   },
-  pressed: { opacity: 0.68 },
+  pressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
   topRow: { alignItems: 'center', flexDirection: 'row', gap: spacing.md },
   icon: {
     alignItems: 'center',

@@ -1,20 +1,23 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MiqyasBrand } from '../components/MiqyasBrand';
+import { Reveal } from '../components/Reveal';
+import { CardSkeleton, SkeletonBlock } from '../components/Skeleton';
 import { UsageHistoryChart } from '../components/UsageHistoryChart';
 import type { HistoryService } from '../services';
 import { useHouseholdProfile } from '../state/HouseholdProfileContext';
-import { colors, radii, shadows, spacing, typography } from '../theme';
+import {
+  borders,
+  colors,
+  layout,
+  radii,
+  shadows,
+  spacing,
+  typography,
+} from '../theme';
 import type {
   HistoryAppliance,
   HistoryPeriod,
@@ -22,6 +25,7 @@ import type {
   UsageHistoryData,
 } from '../types/history';
 import { formatEgp, formatNumber } from '../utils/format';
+import { feedback } from '../utils/feedback';
 
 const applianceLabels: Record<HistoryAppliance, string> = {
   total: 'Total home',
@@ -57,7 +61,10 @@ function Toggle<T extends string>({
           key={item.id}
           accessibilityRole="button"
           accessibilityState={{ selected: item.id === value }}
-          onPress={() => onChange(item.id)}
+          onPress={() => {
+            void feedback.selection();
+            onChange(item.id);
+          }}
           style={[
             styles.toggleButton,
             item.id === value && styles.activeToggle,
@@ -199,10 +206,14 @@ export function UsageHistoryScreen({
           {availableFilters.map((item) => (
             <Pressable
               key={item.id}
-              onPress={() => setAppliance(item.id)}
-              style={[
+              onPress={() => {
+                void feedback.selection();
+                setAppliance(item.id);
+              }}
+              style={({ pressed }) => [
                 styles.filter,
                 activeAppliance === item.id && styles.activeFilter,
+                pressed && styles.pressed,
               ]}
             >
               <Text
@@ -239,8 +250,9 @@ export function UsageHistoryScreen({
               </>
             ) : (
               <>
-                <ActivityIndicator color={colors.primary} />
-                <Text style={styles.subtitle}>Loading usage history…</Text>
+                <SkeletonBlock height={28} width="48%" />
+                <CardSkeleton />
+                <SkeletonBlock height={180} />
               </>
             )}
           </View>
@@ -253,7 +265,10 @@ export function UsageHistoryScreen({
             </Text>
           </View>
         ) : (
-          <>
+          <Reveal
+            key={`${period}:${unit}:${activeAppliance}:${currentData.simulationSeed}`}
+            style={styles.loadedContent}
+          >
             <View style={styles.reconciliationCard}>
               <View style={styles.reconciliationHeader}>
                 <View style={styles.connectedIcon}>
@@ -343,6 +358,7 @@ export function UsageHistoryScreen({
                 granularity={currentData.granularity}
                 selectedIndex={selectedIndex}
                 onSelect={(index) => {
+                  void feedback.selection();
                   setSelectedIndex(index);
                   setOpenAnomaly(false);
                 }}
@@ -376,7 +392,7 @@ export function UsageHistoryScreen({
                 </View>
               </Pressable>
             ) : null}
-          </>
+          </Reveal>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -385,7 +401,13 @@ export function UsageHistoryScreen({
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.background, flex: 1 },
-  content: { gap: spacing.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: {
+    ...layout.screenContent,
+    gap: spacing.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+  },
+  loadedContent: { gap: spacing.xl },
   title: { ...typography.title, color: colors.text },
   subtitle: { ...typography.body, color: colors.textMuted },
   toggle: {
@@ -421,7 +443,9 @@ const styles = StyleSheet.create({
   },
   filterText: { ...typography.label, color: colors.textMuted },
   activeFilterText: { color: colors.surface },
+  pressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
   chartCard: {
+    ...borders.card,
     ...shadows.card,
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
@@ -429,6 +453,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   reconciliationCard: {
+    ...borders.subtle,
     ...shadows.card,
     backgroundColor: colors.tealSoft,
     borderRadius: radii.lg,
@@ -464,6 +489,7 @@ const styles = StyleSheet.create({
     ...typography.heading,
     color: colors.primaryDark,
     fontSize: 16,
+    fontVariant: ['tabular-nums'],
   },
   summaryLabel: { color: colors.textMuted, fontSize: 10, lineHeight: 14 },
   reconciliationNote: {
@@ -482,13 +508,14 @@ const styles = StyleSheet.create({
   contribution: { color: colors.teal, fontSize: 11, marginTop: spacing.xs },
   unit: { ...typography.label, color: colors.primary },
   state: {
-    alignItems: 'center',
+    alignItems: 'stretch',
     gap: spacing.md,
     justifyContent: 'center',
     minHeight: 300,
   },
   stateTitle: { ...typography.heading, color: colors.text },
   retry: {
+    alignSelf: 'center',
     backgroundColor: colors.primary,
     borderRadius: radii.md,
     minHeight: 44,

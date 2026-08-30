@@ -3,6 +3,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -21,14 +23,26 @@ import {
 } from 'react-native-safe-area-context';
 
 import { MiqyasBrand } from '../components/MiqyasBrand';
+import { Reveal } from '../components/Reveal';
+import { CardSkeleton, SkeletonBlock } from '../components/Skeleton';
 import { useMobileBrowserBottomInset } from '../hooks/useMobileBrowserBottomInset';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import type { DashboardService, HistoryService } from '../services';
 import {
   generateSmartTips,
   sendTipChatMessage,
 } from '../services/geminiService';
 import { useHouseholdProfile } from '../state/HouseholdProfileContext';
-import { colors, radii, shadows, spacing, typography } from '../theme';
+import {
+  borders,
+  colors,
+  layout,
+  motion,
+  radii,
+  shadows,
+  spacing,
+  typography,
+} from '../theme';
 import type {
   FullUsageData,
   HouseholdTipData,
@@ -36,6 +50,7 @@ import type {
   SmartTipCategory,
   TipChatMessage,
 } from '../types/smartTips';
+import { feedback } from '../utils/feedback';
 
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000;
 const tipIcons: Record<SmartTipCategory, keyof typeof Ionicons.glyphMap> = {
@@ -45,6 +60,64 @@ const tipIcons: Record<SmartTipCategory, keyof typeof Ionicons.glyphMap> = {
   lighting: 'bulb-outline',
   behavior: 'people-outline',
 };
+
+function SparklePulse() {
+  const scale = useMemo(() => new Animated.Value(0.8), []);
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (reducedMotion) {
+      scale.setValue(1);
+      return;
+    }
+    Animated.sequence([
+      Animated.timing(scale, {
+        duration: motion.normal,
+        easing: Easing.out(Easing.back(1.4)),
+        toValue: 1.18,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        duration: motion.fast,
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [reducedMotion, scale]);
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Ionicons color={colors.surface} name="sparkles" size={25} />
+    </Animated.View>
+  );
+}
+
+function TypingIndicator() {
+  const opacity = useMemo(() => new Animated.Value(0.35), []);
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (reducedMotion) return;
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          duration: 420,
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          duration: 420,
+          toValue: 0.35,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [opacity, reducedMotion]);
+  return (
+    <Animated.View style={[styles.typingBubble, { opacity }]}>
+      <Text style={styles.typingText}>Miqyas is thinking…</Text>
+    </Animated.View>
+  );
+}
 
 interface CachedTips {
   inputSignature: string;
@@ -276,7 +349,10 @@ export function SmartTipsScreen({
           <Pressable
             accessibilityLabel="Generate new smart tips"
             disabled={isLoading}
-            onPress={() => void loadTips(true)}
+            onPress={() => {
+              void feedback.selection();
+              void loadTips(true);
+            }}
             style={({ pressed }) => [
               styles.refreshButton,
               pressed && styles.pressed,
@@ -287,9 +363,11 @@ export function SmartTipsScreen({
         </View>
 
         {isLoading && tips.length === 0 ? (
-          <View style={styles.state}>
-            <ActivityIndicator color={colors.primary} size="large" />
-            <Text style={styles.stateTitle}>Creating your energy tips</Text>
+          <View style={styles.tipSkeletons}>
+            <SkeletonBlock height={72} />
+            <CardSkeleton compact />
+            <CardSkeleton compact />
+            <CardSkeleton compact />
             <Text style={styles.stateText}>
               Reviewing this household’s latest usage…
             </Text>
@@ -312,6 +390,16 @@ export function SmartTipsScreen({
           </View>
         ) : (
           <View style={styles.tipList}>
+            {fullUsageData ? (
+              <View style={styles.latestContext}>
+                <Ionicons color={colors.success} name="sync" size={15} />
+                <Text style={styles.latestContextText}>
+                  Based on the latest{' '}
+                  {fullUsageData.dashboard.simulationScenario.toLowerCase()}{' '}
+                  simulation
+                </Text>
+              </View>
+            ) : null}
             <Pressable
               accessibilityHint="Opens a general conversation about this household's energy use"
               accessibilityRole="button"
@@ -322,11 +410,7 @@ export function SmartTipsScreen({
               ]}
             >
               <View style={styles.chatIconBox}>
-                <Ionicons
-                  color={colors.surface}
-                  name="chatbubbles-outline"
-                  size={25}
-                />
+                <SparklePulse />
               </View>
               <View style={styles.tipBody}>
                 <Text style={styles.startChatTitle}>Start a Chat</Text>
@@ -337,46 +421,48 @@ export function SmartTipsScreen({
               <Ionicons color={colors.surface} name="arrow-forward" size={21} />
             </Pressable>
             {tips.map((tip, index) => (
-              <Pressable
-                accessibilityHint="Opens a conversation about this recommendation"
-                key={tip.id}
-                onPress={() => setSelectedTip(tip)}
-                style={({ pressed }) => [
-                  styles.tipCard,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <View style={styles.iconBox}>
-                  <Ionicons
-                    color={colors.primary}
-                    name={tipIcons[tip.category]}
-                    size={24}
-                  />
-                </View>
-                <View style={styles.tipBody}>
-                  <View style={styles.tipTopRow}>
-                    <Text style={styles.tipNumber}>TIP {index + 1}</Text>
-                    <Text style={styles.category}>
-                      {tip.category.toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={styles.tipTitle}>{tip.title}</Text>
-                  <Text style={styles.tipSummary}>{tip.summary}</Text>
-                  <View style={styles.savingsRow}>
+              <Reveal delay={index * 55} key={tip.id}>
+                <Pressable
+                  accessibilityHint="Opens a conversation about this recommendation"
+                  onPress={() => setSelectedTip(tip)}
+                  style={({ pressed }) => [
+                    styles.tipCard,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <View style={styles.categoryAccent} />
+                  <View style={styles.iconBox}>
                     <Ionicons
-                      color={colors.success}
-                      name="trending-down"
-                      size={16}
+                      color={colors.primary}
+                      name={tipIcons[tip.category]}
+                      size={24}
                     />
-                    <Text style={styles.savings}>{tip.estimatedSavings}</Text>
                   </View>
-                </View>
-                <Ionicons
-                  color={colors.textMuted}
-                  name="chevron-forward"
-                  size={20}
-                />
-              </Pressable>
+                  <View style={styles.tipBody}>
+                    <View style={styles.tipTopRow}>
+                      <Text style={styles.tipNumber}>TIP {index + 1}</Text>
+                      <Text style={styles.category}>
+                        {tip.category.toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text style={styles.tipTitle}>{tip.title}</Text>
+                    <Text style={styles.tipSummary}>{tip.summary}</Text>
+                    <View style={styles.savingsRow}>
+                      <Ionicons
+                        color={colors.success}
+                        name="trending-down"
+                        size={16}
+                      />
+                      <Text style={styles.savings}>{tip.estimatedSavings}</Text>
+                    </View>
+                  </View>
+                  <Ionicons
+                    color={colors.textMuted}
+                    name="chevron-forward"
+                    size={20}
+                  />
+                </Pressable>
+              </Reveal>
             ))}
             <Text style={styles.disclaimer}>
               AI-generated guidance may be inaccurate. Confirm safety-critical
@@ -461,6 +547,7 @@ function TipChatModal({
     setDraft('');
     setError(null);
     setIsSending(true);
+    void feedback.selection();
     try {
       await AsyncStorage.setItem(storageKey, JSON.stringify(history));
       const reply = await sendTipChatMessage(
@@ -546,23 +633,28 @@ function TipChatModal({
                   : 'Ask anything about this home’s energy use, appliances, bill forecast, tariff, or ways to save.'}
               </Text>
             }
+            ListFooterComponent={isSending ? <TypingIndicator /> : null}
             renderItem={({ item }) => (
-              <View
-                style={[
-                  styles.bubble,
-                  item.role === 'user' ? styles.userBubble : styles.modelBubble,
-                ]}
-              >
-                <Text
-                  style={
+              <Reveal>
+                <View
+                  style={[
+                    styles.bubble,
                     item.role === 'user'
-                      ? styles.userBubbleText
-                      : styles.modelBubbleText
-                  }
+                      ? styles.userBubble
+                      : styles.modelBubble,
+                  ]}
                 >
-                  {item.text}
-                </Text>
-              </View>
+                  <Text
+                    style={
+                      item.role === 'user'
+                        ? styles.userBubbleText
+                        : styles.modelBubbleText
+                    }
+                  >
+                    {item.text}
+                  </Text>
+                </View>
+              </Reveal>
             )}
           />
           {error ? <Text style={styles.chatError}>{error}</Text> : null}
@@ -618,7 +710,12 @@ function TipChatModal({
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.background, flex: 1 },
-  content: { gap: spacing.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: {
+    ...layout.screenContent,
+    gap: spacing.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+  },
   header: {
     alignItems: 'flex-start',
     flexDirection: 'row',
@@ -638,7 +735,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 44,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
+  tipSkeletons: { gap: spacing.md },
   state: {
     alignItems: 'center',
     backgroundColor: colors.surface,
@@ -667,13 +765,13 @@ const styles = StyleSheet.create({
   primaryButtonText: { ...typography.label, color: colors.surface },
   tipList: { gap: spacing.md },
   startChatCard: {
+    ...shadows.elevated,
     alignItems: 'center',
     backgroundColor: colors.primary,
     borderRadius: radii.lg,
     flexDirection: 'row',
     gap: spacing.md,
     padding: spacing.lg,
-    ...shadows.card,
   },
   chatIconBox: {
     alignItems: 'center',
@@ -690,15 +788,23 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   tipCard: {
+    ...borders.card,
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderColor: colors.border,
     borderRadius: radii.lg,
-    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.md,
     padding: spacing.lg,
     ...shadows.card,
+    overflow: 'hidden',
+  },
+  categoryAccent: {
+    backgroundColor: colors.teal,
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    top: 0,
+    width: 4,
   },
   iconBox: {
     alignItems: 'center',
@@ -723,6 +829,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.xs,
     marginTop: spacing.sm,
+    alignSelf: 'flex-start',
+    backgroundColor: colors.successSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   savings: { ...typography.label, color: colors.success },
   disclaimer: {
@@ -735,6 +846,7 @@ const styles = StyleSheet.create({
   modalFlex: { flex: 1 },
   modalHeaderSafeArea: { backgroundColor: colors.surface },
   modalHeader: {
+    ...layout.screenContent,
     alignItems: 'center',
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
@@ -750,8 +862,14 @@ const styles = StyleSheet.create({
   modalHeading: { flex: 1, marginLeft: spacing.sm },
   modalTitle: { ...typography.heading },
   modalSubtitle: { ...typography.body, color: colors.textMuted, fontSize: 13 },
-  messages: { flexGrow: 1, gap: spacing.md, padding: spacing.lg },
+  messages: {
+    ...layout.screenContent,
+    flexGrow: 1,
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
   contextCard: {
+    ...borders.subtle,
     backgroundColor: colors.tealSoft,
     borderRadius: radii.md,
     gap: spacing.sm,
@@ -782,6 +900,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   composer: {
+    ...layout.screenContent,
     alignItems: 'flex-end',
     backgroundColor: colors.surface,
     flexDirection: 'row',
@@ -814,4 +933,28 @@ const styles = StyleSheet.create({
     width: 46,
   },
   disabledButton: { opacity: 0.45 },
+  latestContext: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.successSoft,
+    borderRadius: radii.pill,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  latestContextText: {
+    ...typography.label,
+    color: colors.success,
+    fontSize: 11,
+  },
+  typingBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surfaceStrong,
+    borderRadius: radii.lg,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  typingText: { ...typography.body, color: colors.textMuted, fontSize: 13 },
 });

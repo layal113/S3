@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { MiqyasSplashScreen } from './src/components/MiqyasSplashScreen';
+import { useWebAppChrome } from './src/hooks/useWebAppChrome';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { dashboardService, historyService } from './src/services';
 import { HouseholdProfileProvider } from './src/state/HouseholdProfileContext';
@@ -19,6 +20,7 @@ import { HouseholdProfileProvider } from './src/state/HouseholdProfileContext';
 void SplashScreen.preventAutoHideAsync();
 
 export default function App() {
+  useWebAppChrome();
   const [showSplash, setShowSplash] = useState(true);
   const [fontsLoaded, fontError] = useFonts({
     Orbitron_700Bold,

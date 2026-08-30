@@ -14,11 +14,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MiqyasBrand } from '../components/MiqyasBrand';
+import { Reveal } from '../components/Reveal';
 import {
   useHouseholdProfile,
   type HouseholdProfile,
 } from '../state/HouseholdProfileContext';
-import { colors, radii, shadows, spacing, typography } from '../theme';
+import {
+  borders,
+  colors,
+  layout,
+  radii,
+  shadows,
+  spacing,
+  typography,
+} from '../theme';
+import { feedback } from '../utils/feedback';
 
 interface EditableProfile {
   userName: string;
@@ -120,15 +130,18 @@ function EditField({
   onChangeText: (value: string) => void;
   keyboardType?: 'default' | 'number-pad';
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
         keyboardType={keyboardType}
+        onBlur={() => setFocused(false)}
         onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
         selectionColor={colors.primary}
-        style={styles.input}
+        style={[styles.input, focused && styles.focusedInput]}
         value={value}
       />
     </View>
@@ -176,6 +189,7 @@ export function ProfileScreen() {
           : profile.tariffTier,
       simulated: draft.simulated,
     });
+    void feedback.success();
     setIsEditing(false);
   };
 
@@ -206,7 +220,7 @@ export function ProfileScreen() {
           </Pressable>
         </View>
 
-        <View style={styles.identityCard}>
+        <Reveal style={styles.identityCard}>
           <View style={styles.profileIcon}>
             <Ionicons color={colors.primary} name="person" size={42} />
           </View>
@@ -218,9 +232,9 @@ export function ProfileScreen() {
               {profile.simulated ? 'Simulated Data' : 'Live Data'}
             </Text>
           </View>
-        </View>
+        </Reveal>
 
-        <View style={styles.detailsCard}>
+        <Reveal delay={60} style={styles.detailsCard}>
           <ProfileDetail
             icon={detailIcons.householdName}
             label="Household name"
@@ -251,9 +265,9 @@ export function ProfileScreen() {
             label="Current tariff tier"
             value={`Tier ${profile.tariffTier}`}
           />
-        </View>
+        </Reveal>
 
-        <View style={styles.bookingsSection}>
+        <Reveal delay={120} style={styles.bookingsSection}>
           <Text style={styles.sectionLabel}>MY BOOKINGS</Text>
           <Pressable
             accessibilityLabel={`Open CT clamp installation bookings. ${confirmedBooking ?? 'No installation booked'}.`}
@@ -283,7 +297,7 @@ export function ProfileScreen() {
               size={22}
             />
           </Pressable>
-        </View>
+        </Reveal>
       </ScrollView>
 
       <Modal
@@ -337,6 +351,7 @@ export function ProfileScreen() {
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
                     onPress={() => {
+                      void feedback.selection();
                       setSelectedBookingDate(day.id);
                       setSelectedSlot(null);
                     }}
@@ -383,7 +398,10 @@ export function ProfileScreen() {
                     key={slot}
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
-                    onPress={() => setSelectedSlot(slot)}
+                    onPress={() => {
+                      void feedback.selection();
+                      setSelectedSlot(slot);
+                    }}
                     style={[styles.slot, selected && styles.selectedSlot]}
                   >
                     <Ionicons
@@ -413,6 +431,7 @@ export function ProfileScreen() {
                 setConfirmedBooking(
                   `${selectedDay.weekday}, ${selectedDay.month} ${selectedDay.day} at ${selectedSlot}`,
                 );
+                void feedback.success();
                 setIsBookingsOpen(false);
               }}
               style={({ pressed }) => [
@@ -442,7 +461,7 @@ export function ProfileScreen() {
             onPress={() => setIsEditing(false)}
             style={styles.backdrop}
           />
-          <View style={styles.modalCard}>
+          <SafeAreaView edges={['bottom']} style={styles.modalCard}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <View>
@@ -572,7 +591,7 @@ export function ProfileScreen() {
                 <Text style={styles.saveButtonText}>Save changes</Text>
               </Pressable>
             </ScrollView>
-          </View>
+          </SafeAreaView>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
@@ -581,7 +600,12 @@ export function ProfileScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.background, flex: 1 },
-  content: { gap: spacing.xl, padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: {
+    ...layout.screenContent,
+    gap: spacing.xl,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+  },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -599,8 +623,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   editButtonText: { ...typography.label, color: colors.surface },
-  pressed: { opacity: 0.72 },
+  pressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
   identityCard: {
+    ...borders.card,
     ...shadows.card,
     alignItems: 'center',
     backgroundColor: colors.surface,
@@ -636,7 +661,7 @@ const styles = StyleSheet.create({
   },
   statusText: { ...typography.label, color: colors.success },
   detailsCard: {
-    ...shadows.card,
+    ...borders.card,
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
     paddingHorizontal: spacing.lg,
@@ -669,6 +694,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   bookingsCard: {
+    ...borders.card,
     ...shadows.card,
     alignItems: 'center',
     backgroundColor: colors.surface,
@@ -690,10 +716,12 @@ const styles = StyleSheet.create({
   bookingTitle: { ...typography.heading, color: colors.text, fontSize: 17 },
   bookingStatus: { ...typography.body, color: colors.textMuted, fontSize: 13 },
   bookingModalCard: {
+    ...shadows.elevated,
     backgroundColor: colors.surface,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     gap: spacing.lg,
+    maxHeight: '90%',
     padding: spacing.xl,
   },
   pickerLabel: {
@@ -749,12 +777,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.primary,
     borderRadius: radii.md,
+    minHeight: 48,
     padding: spacing.md,
   },
   disabledButton: { opacity: 0.42 },
   modalRoot: { flex: 1, justifyContent: 'flex-end' },
   backdrop: {
-    backgroundColor: 'rgba(20, 31, 25, 0.5)',
+    backgroundColor: colors.overlay,
     bottom: 0,
     left: 0,
     position: 'absolute',
@@ -762,6 +791,7 @@ const styles = StyleSheet.create({
     top: 0,
   },
   modalCard: {
+    ...shadows.elevated,
     backgroundColor: colors.surface,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
@@ -806,6 +836,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  focusedInput: { borderColor: colors.primary, borderWidth: 2 },
   statusOptions: { flexDirection: 'row', gap: spacing.sm },
   statusOption: {
     alignItems: 'center',

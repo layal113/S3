@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors, radii, spacing, typography } from '../theme';
+import { borders, colors, radii, spacing, typography } from '../theme';
 import type { PriorityInsight } from '../types/dashboard';
 
 export function PriorityInsightCard({ insight }: { insight: PriorityInsight }) {
@@ -22,10 +22,10 @@ export function PriorityInsightCard({ insight }: { insight: PriorityInsight }) {
 
 const styles = StyleSheet.create({
   card: {
+    ...borders.subtle,
     backgroundColor: colors.warningSoft,
     borderColor: colors.warningBorder,
     borderRadius: radii.md,
-    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.md,
     padding: spacing.lg,

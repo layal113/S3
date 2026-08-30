@@ -10,10 +10,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
-import { colors, radii, shadows, spacing, typography } from '../theme';
+import { borders, colors, radii, shadows, spacing, typography } from '../theme';
 import type { ApplianceUsage } from '../types/dashboard';
 import type { HistoryAppliance } from '../types/history';
 import { formatNumber } from '../utils/format';
+import { feedback } from '../utils/feedback';
 
 const chartColors = [
   '#2E7D4A',
@@ -40,7 +41,10 @@ export function ApplianceBreakdown({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Open appliance breakdown. ${top.category} is highest at ${top.sharePercent} percent.`}
-        onPress={() => setOpen(true)}
+        onPress={() => {
+          void feedback.selection();
+          setOpen(true);
+        }}
         style={({ pressed }) => [styles.preview, pressed && styles.pressed]}
       >
         <View style={styles.previewIcon}>
@@ -170,6 +174,7 @@ export function ApplianceBreakdown({
 
 const styles = StyleSheet.create({
   preview: {
+    ...borders.card,
     ...shadows.card,
     alignItems: 'center',
     backgroundColor: colors.surface,
@@ -179,7 +184,7 @@ const styles = StyleSheet.create({
     minHeight: 96,
     padding: spacing.lg,
   },
-  pressed: { opacity: 0.7 },
+  pressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
   previewIcon: {
     alignItems: 'center',
     backgroundColor: colors.blueSoft,
@@ -193,17 +198,21 @@ const styles = StyleSheet.create({
   previewTitle: { ...typography.body, color: colors.text, fontWeight: '600' },
   link: { ...typography.label, color: colors.teal },
   overlay: {
-    backgroundColor: 'rgba(20,30,25,0.42)',
+    backgroundColor: colors.overlay,
     flex: 1,
     justifyContent: 'flex-end',
   },
   dismissArea: { flex: 1 },
   sheet: {
+    ...shadows.elevated,
+    alignSelf: 'center',
     backgroundColor: colors.surface,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     maxHeight: '82%',
     padding: spacing.lg,
+    width: '100%',
+    maxWidth: 720,
   },
   handle: {
     alignSelf: 'center',

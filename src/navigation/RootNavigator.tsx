@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
-import { Platform, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMobileBrowserBottomInset } from '../hooks/useMobileBrowserBottomInset';
@@ -67,34 +67,46 @@ export function RootNavigator({
   const browserBottomInset = useMobileBrowserBottomInset();
   const { width } = useWindowDimensions();
   const isMobileWeb = Platform.OS === 'web' && width <= 768;
+  const bottomPadding = isMobileWeb
+    ? Math.max(insets.bottom, browserBottomInset, 8)
+    : Math.max(insets.bottom, 6);
   const { selectedHouseholdId } = useHouseholdProfile();
 
   return (
     <NavigationContainer theme={navigationTheme}>
       <Tab.Navigator
-        safeAreaInsets={{ bottom: insets.bottom }}
+        safeAreaInsets={{ bottom: 0 }}
         screenOptions={({ route }) => ({
           headerShown: false,
+          animation: 'fade',
+          tabBarHideOnKeyboard: true,
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textMuted,
-          tabBarLabelStyle: { ...typography.label, fontSize: 11 },
+          tabBarLabelStyle: {
+            ...typography.label,
+            fontSize: 10,
+            marginTop: 2,
+          },
+          tabBarItemStyle: { minHeight: 54, paddingTop: 3 },
           tabBarStyle: {
             ...shadows.card,
             backgroundColor: colors.surface,
             borderTopColor: colors.border,
-            marginBottom: isMobileWeb ? Math.max(16, browserBottomInset) : 0,
-            minHeight: 60,
-            paddingBottom: 6,
-            paddingTop: 8,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            height: 58 + bottomPadding,
+            paddingBottom: bottomPadding,
+            paddingTop: 5,
           },
           tabBarIcon: ({ color, focused, size }) => (
-            <Ionicons
-              color={color}
-              name={
-                focused ? activeIconNames[route.name] : iconNames[route.name]
-              }
-              size={size}
-            />
+            <View style={[styles.iconContainer, focused && styles.activeIcon]}>
+              <Ionicons
+                color={color}
+                name={
+                  focused ? activeIconNames[route.name] : iconNames[route.name]
+                }
+                size={focused ? size + 1 : size}
+              />
+            </View>
           ),
         })}
       >
@@ -138,3 +150,14 @@ export function RootNavigator({
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  iconContainer: {
+    alignItems: 'center',
+    borderRadius: 14,
+    height: 30,
+    justifyContent: 'center',
+    width: 42,
+  },
+  activeIcon: { backgroundColor: colors.tealSoft },
+});

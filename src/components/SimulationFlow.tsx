@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -13,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { HouseholdProfile } from '../state/HouseholdProfileContext';
-import { colors, radii, shadows, spacing, typography } from '../theme';
+import { borders, colors, radii, shadows, spacing, typography } from '../theme';
 import type { HouseholdId } from '../types/dashboard';
 import type {
   OccupancyMode,
@@ -86,6 +87,66 @@ function ChoiceRow<T extends string>({
             </Text>
           </Pressable>
         ))}
+      </View>
+    </View>
+  );
+}
+
+const simulationStages = [
+  'Generating household activity',
+  'Processing appliance usage',
+  'Updating forecast and tariff',
+  'Refreshing Insights and Smart Tips',
+];
+
+function SimulationProgress() {
+  const [activeStep, setActiveStep] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(
+      () => setActiveStep((current) => Math.min(current + 1, 3)),
+      650,
+    );
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <View accessibilityRole="progressbar" style={styles.progressPanel}>
+      <View style={styles.progressIcon}>
+        <ActivityIndicator color={colors.surface} size="small" />
+      </View>
+      <View style={styles.progressHeading}>
+        <Text style={styles.sheetTitle}>Building your scenario</Text>
+        <Text style={styles.helper}>This normally takes only a moment.</Text>
+      </View>
+      <View style={styles.progressStages}>
+        {simulationStages.map((stage, index) => {
+          const completed = index < activeStep;
+          const active = index === activeStep;
+          return (
+            <View key={stage} style={styles.progressStage}>
+              <View
+                style={[
+                  styles.progressDot,
+                  (completed || active) && styles.activeProgressDot,
+                ]}
+              >
+                {completed ? (
+                  <Ionicons color={colors.surface} name="checkmark" size={14} />
+                ) : active ? (
+                  <View style={styles.innerProgressDot} />
+                ) : null}
+              </View>
+              <Text
+                style={[
+                  styles.progressText,
+                  (completed || active) && styles.activeProgressText,
+                ]}
+              >
+                {stage}
+              </Text>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -176,7 +237,7 @@ export function SimulationSetupSheet({
       <View style={styles.overlay}>
         <Pressable
           accessibilityLabel="Close simulation setup"
-          onPress={onClose}
+          onPress={isRunning ? undefined : onClose}
           style={styles.dismissArea}
         />
         <SafeAreaView edges={['bottom']} style={styles.sheet}>
@@ -190,219 +251,227 @@ export function SimulationSetupSheet({
             </View>
             <Pressable
               accessibilityLabel="Close"
+              disabled={isRunning}
               onPress={onClose}
               style={styles.closeButton}
             >
               <Ionicons color={colors.text} name="close" size={24} />
             </Pressable>
           </View>
-          <ScrollView
-            contentContainerStyle={styles.sheetContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.modeGrid}>
-              <Pressable
-                onPress={() => setMode('surprise')}
-                style={[
-                  styles.modeCard,
-                  mode === 'surprise' && styles.selectedMode,
-                ]}
-              >
-                <Ionicons
-                  color={mode === 'surprise' ? colors.surface : colors.primary}
-                  name="sparkles"
-                  size={24}
-                />
-                <Text
+          {isRunning ? (
+            <SimulationProgress />
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.sheetContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.modeGrid}>
+                <Pressable
+                  onPress={() => setMode('surprise')}
                   style={[
-                    styles.modeTitle,
-                    mode === 'surprise' && styles.selectedModeText,
+                    styles.modeCard,
+                    mode === 'surprise' && styles.selectedMode,
                   ]}
                 >
-                  Surprise me
-                </Text>
-                <Text
+                  <Ionicons
+                    color={
+                      mode === 'surprise' ? colors.surface : colors.primary
+                    }
+                    name="sparkles"
+                    size={24}
+                  />
+                  <Text
+                    style={[
+                      styles.modeTitle,
+                      mode === 'surprise' && styles.selectedModeText,
+                    ]}
+                  >
+                    Surprise me
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeText,
+                      mode === 'surprise' && styles.selectedModeText,
+                    ]}
+                  >
+                    Instantly rotate to a meaningful scenario.
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setMode('custom')}
                   style={[
-                    styles.modeText,
-                    mode === 'surprise' && styles.selectedModeText,
+                    styles.modeCard,
+                    mode === 'custom' && styles.selectedMode,
                   ]}
                 >
-                  Instantly rotate to a meaningful scenario.
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setMode('custom')}
-                style={[
-                  styles.modeCard,
-                  mode === 'custom' && styles.selectedMode,
-                ]}
-              >
-                <Ionicons
-                  color={mode === 'custom' ? colors.surface : colors.primary}
-                  name="options"
-                  size={24}
-                />
-                <Text
-                  style={[
-                    styles.modeTitle,
-                    mode === 'custom' && styles.selectedModeText,
-                  ]}
-                >
-                  Customize
-                </Text>
-                <Text
-                  style={[
-                    styles.modeText,
-                    mode === 'custom' && styles.selectedModeText,
-                  ]}
-                >
-                  Choose conditions and appliance behavior.
-                </Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.profileRow}>
-              <View style={styles.profileCopy}>
-                <Text style={styles.fieldLabel}>
-                  Use saved household profile
-                </Text>
-                <Text style={styles.helper}>
-                  {profile.homeType} · {profile.residents} residents ·{' '}
-                  {profile.location}
-                </Text>
+                  <Ionicons
+                    color={mode === 'custom' ? colors.surface : colors.primary}
+                    name="options"
+                    size={24}
+                  />
+                  <Text
+                    style={[
+                      styles.modeTitle,
+                      mode === 'custom' && styles.selectedModeText,
+                    ]}
+                  >
+                    Customize
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeText,
+                      mode === 'custom' && styles.selectedModeText,
+                    ]}
+                  >
+                    Choose conditions and appliance behavior.
+                  </Text>
+                </Pressable>
               </View>
-              <Switch
-                onValueChange={setUseProfile}
-                trackColor={{ true: colors.teal }}
-                value={useProfile}
-              />
-            </View>
 
-            {mode === 'custom' ? (
-              <View style={styles.customFields}>
-                <ChoiceRow
-                  label="Starting scenario"
-                  options={scenarios.map((item) => ({
-                    value: item.id,
-                    label: item.label,
-                  }))}
-                  value={selectedScenarioId}
-                  onChange={setScenarioId}
+              <View style={styles.profileRow}>
+                <View style={styles.profileCopy}>
+                  <Text style={styles.fieldLabel}>
+                    Use saved household profile
+                  </Text>
+                  <Text style={styles.helper}>
+                    {profile.homeType} · {profile.residents} residents ·{' '}
+                    {profile.location}
+                  </Text>
+                </View>
+                <Switch
+                  onValueChange={setUseProfile}
+                  trackColor={{ true: colors.teal }}
+                  value={useProfile}
                 />
-                <ChoiceRow
-                  label="Temperature"
-                  options={[24, 30, 36].map((value) => ({
-                    value: String(value),
-                    label: `${value}°C`,
-                  }))}
-                  value={String(temperatureC)}
-                  onChange={(value) => setTemperatureC(Number(value))}
-                />
-                <ChoiceRow
-                  label="People at home"
-                  options={[
-                    { value: 'away', label: 'Away' },
-                    { value: 'partial', label: 'Some' },
-                    { value: 'home', label: 'Everyone' },
-                  ]}
-                  value={occupancy}
-                  onChange={setOccupancy}
-                />
-                <ChoiceRow
-                  label="Day"
-                  options={[
-                    { value: 'weekday', label: 'Weekday' },
-                    { value: 'weekend', label: 'Weekend' },
-                  ]}
-                  value={dayType}
-                  onChange={setDayType}
-                />
-                <ChoiceRow
-                  label="Usage level"
-                  options={[
-                    { value: 'low', label: 'Low' },
-                    { value: 'typical', label: 'Typical' },
-                    { value: 'high', label: 'Heavy' },
-                  ]}
-                  value={usageIntensity}
-                  onChange={setUsageIntensity}
-                />
-                <View style={styles.numberGrid}>
-                  <View style={styles.numberField}>
-                    <Text style={styles.fieldLabel}>AC hours</Text>
-                    <TextInput
-                      keyboardType="number-pad"
-                      onChangeText={setAcHours}
-                      style={styles.input}
-                      value={acHours}
-                    />
+              </View>
+
+              {mode === 'custom' ? (
+                <View style={styles.customFields}>
+                  <ChoiceRow
+                    label="Starting scenario"
+                    options={scenarios.map((item) => ({
+                      value: item.id,
+                      label: item.label,
+                    }))}
+                    value={selectedScenarioId}
+                    onChange={setScenarioId}
+                  />
+                  <ChoiceRow
+                    label="Temperature"
+                    options={[24, 30, 36].map((value) => ({
+                      value: String(value),
+                      label: `${value}°C`,
+                    }))}
+                    value={String(temperatureC)}
+                    onChange={(value) => setTemperatureC(Number(value))}
+                  />
+                  <ChoiceRow
+                    label="People at home"
+                    options={[
+                      { value: 'away', label: 'Away' },
+                      { value: 'partial', label: 'Some' },
+                      { value: 'home', label: 'Everyone' },
+                    ]}
+                    value={occupancy}
+                    onChange={setOccupancy}
+                  />
+                  <ChoiceRow
+                    label="Day"
+                    options={[
+                      { value: 'weekday', label: 'Weekday' },
+                      { value: 'weekend', label: 'Weekend' },
+                    ]}
+                    value={dayType}
+                    onChange={setDayType}
+                  />
+                  <ChoiceRow
+                    label="Usage level"
+                    options={[
+                      { value: 'low', label: 'Low' },
+                      { value: 'typical', label: 'Typical' },
+                      { value: 'high', label: 'Heavy' },
+                    ]}
+                    value={usageIntensity}
+                    onChange={setUsageIntensity}
+                  />
+                  <View style={styles.numberGrid}>
+                    <View style={styles.numberField}>
+                      <Text style={styles.fieldLabel}>AC hours</Text>
+                      <TextInput
+                        keyboardType="number-pad"
+                        onChangeText={setAcHours}
+                        style={styles.input}
+                        value={acHours}
+                      />
+                    </View>
+                    <View style={styles.numberField}>
+                      <Text style={styles.fieldLabel}>Thermostat</Text>
+                      <View style={styles.stepper}>
+                        <Pressable
+                          onPress={() =>
+                            setThermostatC((value) => Math.max(18, value - 1))
+                          }
+                          style={styles.stepButton}
+                        >
+                          <Text style={styles.stepText}>−</Text>
+                        </Pressable>
+                        <Text style={styles.stepValue}>{thermostatC}°C</Text>
+                        <Pressable
+                          onPress={() =>
+                            setThermostatC((value) => Math.min(30, value + 1))
+                          }
+                          style={styles.stepButton}
+                        >
+                          <Text style={styles.stepText}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
                   </View>
-                  <View style={styles.numberField}>
-                    <Text style={styles.fieldLabel}>Thermostat</Text>
-                    <View style={styles.stepper}>
-                      <Pressable
-                        onPress={() =>
-                          setThermostatC((value) => Math.max(18, value - 1))
-                        }
-                        style={styles.stepButton}
-                      >
-                        <Text style={styles.stepText}>−</Text>
-                      </Pressable>
-                      <Text style={styles.stepValue}>{thermostatC}°C</Text>
-                      <Pressable
-                        onPress={() =>
-                          setThermostatC((value) => Math.min(30, value + 1))
-                        }
-                        style={styles.stepButton}
-                      >
-                        <Text style={styles.stepText}>+</Text>
-                      </Pressable>
+                  <View style={styles.field}>
+                    <Text style={styles.fieldLabel}>Extra appliances</Text>
+                    <View style={styles.chips}>
+                      {applianceOptions.map(([id, label]) => (
+                        <Pressable
+                          accessibilityRole="checkbox"
+                          accessibilityState={{
+                            checked: appliances.includes(id),
+                          }}
+                          key={id}
+                          onPress={() => toggleAppliance(id)}
+                          style={[
+                            styles.chip,
+                            appliances.includes(id) && styles.selectedChip,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.chipText,
+                              appliances.includes(id) &&
+                                styles.selectedChipText,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      ))}
                     </View>
                   </View>
                 </View>
-                <View style={styles.field}>
-                  <Text style={styles.fieldLabel}>Extra appliances</Text>
-                  <View style={styles.chips}>
-                    {applianceOptions.map(([id, label]) => (
-                      <Pressable
-                        accessibilityRole="checkbox"
-                        accessibilityState={{
-                          checked: appliances.includes(id),
-                        }}
-                        key={id}
-                        onPress={() => toggleAppliance(id)}
-                        style={[
-                          styles.chip,
-                          appliances.includes(id) && styles.selectedChip,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.chipText,
-                            appliances.includes(id) && styles.selectedChipText,
-                          ]}
-                        >
-                          {label}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
+              ) : (
+                <View style={styles.easyNote}>
+                  <Ionicons
+                    color={colors.primary}
+                    name="information-circle-outline"
+                    size={20}
+                  />
+                  <Text style={styles.helper}>
+                    No setup required. You’ll still get a full explanation,
+                    comparison, and replay option afterward.
+                  </Text>
                 </View>
-              </View>
-            ) : (
-              <View style={styles.easyNote}>
-                <Ionicons
-                  color={colors.primary}
-                  name="information-circle-outline"
-                  size={20}
-                />
-                <Text style={styles.helper}>
-                  No setup required. You’ll still get a full explanation,
-                  comparison, and replay option afterward.
-                </Text>
-              </View>
-            )}
-          </ScrollView>
+              )}
+            </ScrollView>
+          )}
           <Pressable
             accessibilityRole="button"
             disabled={isRunning}
@@ -695,24 +764,32 @@ export function SimulationResultSheet({
 
 const styles = StyleSheet.create({
   overlay: {
-    backgroundColor: 'rgba(20,30,25,0.46)',
+    backgroundColor: colors.overlay,
     flex: 1,
     justifyContent: 'flex-end',
   },
   dismissArea: { flex: 1 },
   sheet: {
+    ...shadows.elevated,
+    alignSelf: 'center',
     backgroundColor: colors.surface,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     maxHeight: '90%',
     padding: spacing.lg,
+    width: '100%',
+    maxWidth: 720,
   },
   resultSheet: {
+    ...shadows.elevated,
+    alignSelf: 'center',
     backgroundColor: colors.surface,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     height: '88%',
     padding: spacing.lg,
+    width: '100%',
+    maxWidth: 720,
   },
   handle: {
     alignSelf: 'center',
@@ -743,9 +820,8 @@ const styles = StyleSheet.create({
   },
   modeGrid: { flexDirection: 'row', gap: spacing.md },
   modeCard: {
-    borderColor: colors.border,
+    ...borders.card,
     borderRadius: radii.md,
-    borderWidth: 1,
     flex: 1,
     gap: spacing.xs,
     minHeight: 128,
@@ -943,4 +1019,50 @@ const styles = StyleSheet.create({
     minHeight: 50,
   },
   disabled: { opacity: 0.5 },
+  progressPanel: {
+    alignItems: 'center',
+    gap: spacing.lg,
+    minHeight: 360,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xxl,
+  },
+  progressIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radii.pill,
+    height: 54,
+    justifyContent: 'center',
+    width: 54,
+  },
+  progressHeading: { alignItems: 'center', gap: spacing.xs },
+  progressStages: { alignSelf: 'stretch', gap: spacing.md },
+  progressStage: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  progressDot: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: radii.pill,
+    borderWidth: 2,
+    height: 24,
+    justifyContent: 'center',
+    width: 24,
+  },
+  activeProgressDot: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  innerProgressDot: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.pill,
+    height: 7,
+    width: 7,
+  },
+  progressText: { ...typography.body, color: colors.textMuted },
+  activeProgressText: {
+    color: colors.text,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
 });

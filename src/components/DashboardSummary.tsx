@@ -12,6 +12,8 @@ export function DashboardSummary({ data }: { data: DashboardData }) {
         label="Predicted month bill"
         qualifier={`${formatNumber(data.changeFromPreviousMonthPercent)}% vs previous forecast · ${formatNumber(data.projectedMonthlyKwh)} kWh projected`}
         value={formatEgp(data.predictedMonthEndBillEgp)}
+        numericValue={data.predictedMonthEndBillEgp}
+        valueFormatter={formatEgp}
       />
       <KpiCard
         icon="speedometer-outline"
@@ -30,6 +32,8 @@ export function DashboardSummary({ data }: { data: DashboardData }) {
         label="Electricity used"
         qualifier="Billing period to date · simulated"
         value={`${formatNumber(data.currentConsumptionKwh)} kWh`}
+        numericValue={data.currentConsumptionKwh}
+        valueFormatter={(value) => `${formatNumber(value)} kWh`}
       />
       <KpiCard
         icon="cash-outline"
@@ -37,6 +41,8 @@ export function DashboardSummary({ data }: { data: DashboardData }) {
         label="Cost so far"
         qualifier="Estimated cost to date · simulated"
         value={formatEgp(data.currentEstimatedCostEgp)}
+        numericValue={data.currentEstimatedCostEgp}
+        valueFormatter={formatEgp}
       />
     </View>
   );

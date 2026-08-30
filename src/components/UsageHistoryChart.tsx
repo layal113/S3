@@ -1,17 +1,28 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  Animated,
+  Easing,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
-import { colors, radii, spacing, typography } from '../theme';
+import { colors, motion, radii, spacing, typography } from '../theme';
 import type {
   HistoryAppliance,
   HistoryPoint,
   HistoryUnit,
 } from '../types/history';
 import { formatNumber } from '../utils/format';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const width = 340;
 const height = 210;
 const plot = { left: 42, right: 12, top: 18, bottom: 34 };
+const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 function valueOf(
   point: HistoryPoint,
@@ -40,6 +51,8 @@ export function UsageHistoryChart({
   selectedIndex: number;
   onSelect: (index: number) => void;
 }) {
+  const [lineProgress] = useState(() => new Animated.Value(1));
+  const reducedMotion = useReducedMotion();
   const values = points.map((item) => valueOf(item, unit, appliance));
   const baselines = points.map((item) =>
     unit === 'kwh' ? item.baselineKWh : item.baselineCostEGP,
@@ -78,6 +91,21 @@ export function UsageHistoryChart({
       weekday: 'short',
     });
   };
+
+  useEffect(() => {
+    lineProgress.stopAnimation();
+    if (reducedMotion) {
+      lineProgress.setValue(1);
+      return;
+    }
+    lineProgress.setValue(0);
+    Animated.timing(lineProgress, {
+      duration: motion.deliberate,
+      easing: Easing.out(Easing.cubic),
+      toValue: 1,
+      useNativeDriver: false,
+    }).start();
+  }, [appliance, lineProgress, points, reducedMotion, unit]);
 
   return (
     <View style={styles.container}>
@@ -135,10 +163,15 @@ export function UsageHistoryChart({
             strokeWidth="2"
           />
         ) : null}
-        <Path
+        <AnimatedPath
           d={linePath}
           fill="none"
           stroke={colors.primary}
+          strokeDasharray="600 600"
+          strokeDashoffset={lineProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [600, 0],
+          })}
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth="3"

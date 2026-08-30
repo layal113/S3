@@ -1,6 +1,17 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { StyleSheet, Text, View } from 'react-native';
-import { colors, radii, shadows, spacing, typography } from '../theme';
+import { useEffect, useState } from 'react';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import {
+  borders,
+  colors,
+  motion,
+  radii,
+  shadows,
+  spacing,
+  typography,
+} from '../theme';
+import { AnimatedMetric } from './AnimatedMetric';
 
 interface Props {
   label: string;
@@ -9,6 +20,8 @@ interface Props {
   icon: keyof typeof Ionicons.glyphMap;
   accent?: 'blue' | 'teal' | 'warning';
   meterPercent?: number;
+  numericValue?: number;
+  valueFormatter?: (value: number) => string;
 }
 
 export function KpiCard({
@@ -18,6 +31,8 @@ export function KpiCard({
   icon,
   accent = 'blue',
   meterPercent,
+  numericValue,
+  valueFormatter,
 }: Props) {
   const accentColor =
     accent === 'teal'
@@ -26,6 +41,23 @@ export function KpiCard({
         ? colors.warning
         : colors.primary;
   const safeMeterPercent = Math.max(0, Math.min(meterPercent ?? 0, 100));
+  const [markerPosition] = useState(
+    () => new Animated.Value(safeMeterPercent),
+  );
+  const reducedMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (reducedMotion) {
+      markerPosition.setValue(safeMeterPercent);
+      return;
+    }
+    Animated.timing(markerPosition, {
+      duration: motion.deliberate,
+      easing: Easing.out(Easing.cubic),
+      toValue: safeMeterPercent,
+      useNativeDriver: false,
+    }).start();
+  }, [markerPosition, reducedMotion, safeMeterPercent]);
 
   return (
     <View
@@ -43,9 +75,17 @@ export function KpiCard({
         <Ionicons color={accentColor} name={icon} size={21} />
       </View>
       <Text style={styles.label}>{label}</Text>
-      <Text adjustsFontSizeToFit numberOfLines={1} style={styles.value}>
-        {value}
-      </Text>
+      {numericValue !== undefined && valueFormatter ? (
+        <AnimatedMetric
+          formatter={valueFormatter}
+          style={styles.value}
+          value={numericValue}
+        />
+      ) : (
+        <Text adjustsFontSizeToFit numberOfLines={1} style={styles.value}>
+          {value}
+        </Text>
+      )}
       {meterPercent !== undefined ? (
         <View
           accessibilityLabel={`${safeMeterPercent}% toward the next tariff tier`}
@@ -55,7 +95,17 @@ export function KpiCard({
           <View style={[styles.segment, styles.yellow]} />
           <View style={[styles.segment, styles.orange]} />
           <View style={[styles.segment, styles.red]} />
-          <View style={[styles.marker, { left: `${safeMeterPercent}%` }]} />
+          <Animated.View
+            style={[
+              styles.marker,
+              {
+                left: markerPosition.interpolate({
+                  inputRange: [0, 100],
+                  outputRange: ['0%', '100%'],
+                }),
+              },
+            ]}
+          />
         </View>
       ) : null}
       <Text style={styles.qualifier}>{qualifier}</Text>
@@ -65,6 +115,7 @@ export function KpiCard({
 
 const styles = StyleSheet.create({
   card: {
+    ...borders.card,
     ...shadows.card,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
@@ -87,7 +138,11 @@ const styles = StyleSheet.create({
   tealIcon: { backgroundColor: colors.tealSoft },
   warningIcon: { backgroundColor: colors.warningSoft },
   label: { ...typography.label, color: colors.textMuted },
-  value: { ...typography.value, color: colors.text },
+  value: {
+    ...typography.value,
+    color: colors.text,
+    fontVariant: ['tabular-nums'],
+  },
   qualifier: { fontSize: 12, lineHeight: 17, color: colors.textMuted },
   meter: {
     borderRadius: radii.pill,
