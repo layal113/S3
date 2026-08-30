@@ -139,4 +139,4 @@ npm run format:check
 
 ## Deployment
 - Backend: Deployed on Render using the provided `Dockerfile`.
-- Frontend: Web application bundle built and deployed via Vercel / Expo static hosting.
+- Frontend: Expo web bundle built as a Render Static Site with a SPA rewrite rule to serve `/index.html` for browser refreshes and deep links.
